@@ -1,5 +1,4 @@
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth/session";
+import { requireUser } from "@/lib/auth/session";
 import { LogoutButton } from "@/components/logout-button";
 import {
   Card,
@@ -12,9 +11,9 @@ import {
 export const runtime = "nodejs";
 
 export default async function DashboardPage() {
-  // Настоящая проверка сессии (middleware лишь смотрит наличие cookie).
-  const user = await getSession();
-  if (!user) redirect("/login");
+  // Настоящая проверка сессии (proxy лишь смотрит наличие cookie).
+  // requireUser сам уведёт на /login, если не вошёл, и вернёт пользователя.
+  const user = await requireUser();
 
   return (
     <main className="flex min-h-screen items-center justify-center p-4">

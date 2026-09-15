@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import {
   SESSION_COOKIE_NAME,
@@ -70,6 +71,18 @@ export async function getSession(): Promise<SessionUser | null> {
   }
 
   return { id: session.user.id, email: session.user.email };
+}
+
+/**
+ * Требует вошедшего пользователя. Если сессии нет — уводит на /login и дальше
+ * код страницы не выполняется (redirect бросает исключение внутри Next).
+ * Вызывайте первой строкой в любом защищённом серверном компоненте / экшене —
+ * это наш «слой доступа к данным» (DAL), единая точка проверки входа.
+ */
+export async function requireUser(): Promise<SessionUser> {
+  const user = await getSession();
+  if (!user) redirect("/login");
+  return user;
 }
 
 /** Удаляет текущую сессию из БД и очищает cookie. */
