@@ -1,0 +1,64 @@
+// Схема БД для email-OTP авторизации.
+// Боевая база — Yandex Managed PostgreSQL, локально — свой Postgres.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7: строка подключения задаётся не здесь, а через driver adapter
+  // (@prisma/adapter-pg) в рантайме и prisma.config.ts для миграций.
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique // всегда в нижнем регистре
+  createdAt DateTime  @default(now())
+  sessions  Session[]
+
+  @@map("users")
+}
+
+/// Одноразовые коды входа. Хранится только хеш кода, не сам код.
+model LoginCode {
+  id         String    @id @default(cuid())
+  email      String
+  codeHash   String // sha256(email + ':' + code)
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  ip         String?
+  createdAt  DateTime  @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("login_codes")
+}
+
+/// Серверные сессии. В cookie лежит сырой токен, в БД — его sha256.
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  userAgent  String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// Счётчик обращений для rate-limit (по email и по IP).
+model RateHit {
+  id        String   @id @default(cuid())
+  bucket    String // напр. "request-code:email" или "request-code:ip"
+  key       String // email или ip
+  createdAt DateTime @default(now())
+
+  @@index([bucket, key, createdAt])
+  @@map("rate_hits")
+}
