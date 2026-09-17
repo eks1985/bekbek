@@ -26,6 +26,7 @@ export function extractLaps(lapMesgs: LapMesg[] = [], points: Point[], sport: st
       index: i + 1,
       trigger: enumToString(lap.lapTrigger),
       intensity: enumToString(lap.intensity),
+      role: null, // роль назначает шаг 7 (--workout)
       ...stats,
       pointRange: range,
     };

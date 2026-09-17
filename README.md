@@ -72,16 +72,46 @@ MAIL_FROM_NAME=Вход
 ## Парсер FIT-файлов тренировок
 
 ```bash
-npm run fit:parse -- samples/24300728659_ACTIVITY.fit   # → output/24300728659_ACTIVITY.json
-npm run fit:parse -- samples/                           # все .fit в папке
-npm run fit:parse -- samples/ --no-points --out results # без посекундных точек, в другую папку
+npm run fit:parse -- samples/24300728659_ACTIVITY.fit     # → output/24300728659_ACTIVITY.json
+npm run fit:parse -- samples/                             # все .fit в папке
+npm run fit:parse -- samples/ --with-points --out results # с посекундными точками, в другую папку
 ```
 
-В JSON: `source` (устройство), `summary` (итоги тренировки), `laps` (все круги),
-`kmSplits` (сплиты по 1 км: из автокругов часов или посчитанные по точкам) и
-`points` (точки записи). Бинарный формат читает официальный `@garmin/fitsdk`,
-остальное — `src/lib/fit/`: файлы с номерами `1-…6-` — шаги по порядку,
-`parse-workout.ts` вызывает их по очереди.
+В JSON: `source` (устройство), `summary` (итоги тренировки), `workout` (схема
+интервалов), `laps` (все круги), `kmSplits` (сплиты по 1 км: из автокругов часов
+или посчитанные по точкам) и — с `--with-points` — `points` (точки записи).
+Бинарный формат читает официальный `@garmin/fitsdk`, остальное — `src/lib/fit/`:
+файлы с номерами `1-…7-` — шаги по порядку, `parse-workout.ts` вызывает их по очереди.
+
+**PowerShell:** при вызове `npm` PowerShell убирает разделитель `--`, и флаги
+(`--workout`, `--with-points`, `--tolerance`, `--out`) забирает себе npm — скрипт
+тогда останавливается с подсказкой. Ставьте разделитель дважды или запускайте
+напрямую:
+
+```powershell
+npm run fit:parse -- -- samples/24300728659_ACTIVITY.fit --workout auto
+npx tsx scripts/parse-fit.ts samples/24300728659_ACTIVITY.fit --workout auto
+```
+
+### Интервалы на стадионе (`--workout`)
+
+GPS на коротких отрезках врёт, поэтому темп можно пересчитать по реальной
+дистанции. Круг 1 считается разминкой, дальше — рабочий отрезок, отдых, рабочий…
+
+```bash
+# найти схему самому: быстрые круги округляются до «целых» дистанций с допуском 5 %
+npm run fit:parse -- file.fit --workout auto
+npm run fit:parse -- file.fit --workout auto --tolerance 3
+# задать рабочие отрезки (отдых не указывается): круги 2, 4, 6…
+npm run fit:parse -- file.fit --workout "200 400 600 1000 600x3"
+# фартлек: дистанций столько же, сколько кругов в файле — задаётся каждый круг
+npm run fit:parse -- file.fit --workout "4000 200 200 400 250 600 400 1000 400 600 400 600 400 600 1000"
+```
+
+У кругов с заданной дистанцией `distanceM` и `avgPace` — по реальной дистанции,
+исходные значения — в `gpsDistanceM` и `gpsAvgPace`. Тег схемы
+(`"200 400 600 1000 600x3"`) — в `summary.workoutTag`, подробности и
+предупреждения — в `workout`. Итоги тренировки и км-сплиты остаются по GPS.
 
 ## Структура
 
@@ -97,3 +127,7 @@ src/app/login/page.tsx      # форма: email → код
 src/app/dashboard/page.tsx  # защищённая страница
 src/app/api/auth/*          # request-code, verify, logout
 ```
+
+
+//npm run fit:parse -- -- samples/24300728659_ACTIVITY.fit --workout auto
+//npx tsx scripts/parse-fit.ts samples/24300728659_ACTIVITY.fit --workout auto

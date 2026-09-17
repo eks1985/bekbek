@@ -37,7 +37,7 @@ function hasKmAutoLaps(laps: Lap[]): boolean {
 
 function lapsToSplits(laps: Lap[]): KmSplit[] {
   return laps.map((lap) => {
-    // Из круга оставляем только статистику: номер, trigger и intensity сплиту не нужны.
+    // Из круга оставляем только статистику: номер, trigger, intensity и role сплиту не нужны.
     const split: KmSplit & Partial<Lap> = {
       ...lap,
       km: lap.index,
@@ -46,6 +46,7 @@ function lapsToSplits(laps: Lap[]): KmSplit[] {
     delete split.index;
     delete split.trigger;
     delete split.intensity;
+    delete split.role;
     return split;
   });
 }

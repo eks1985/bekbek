@@ -67,6 +67,8 @@ export interface WorkoutSummary extends SegmentStats {
   subSport: string | null;
   /** Название спортивного профиля на часах, например «Run». */
   profileName: string | null;
+  /** Тег интервальной тренировки, например "200 400 600 1000 600x3" (при --workout). */
+  workoutTag: string | null;
   /** Время старта в часовом поясе часов, например 2026-09-09T20:18:31+03:00. */
   startTimeLocal: string | null;
   cadenceUnit: "spm" | "rpm";
@@ -82,13 +84,44 @@ export interface WorkoutSummary extends SegmentStats {
   lapCount: number;
 }
 
+/** Роль круга в интервальной тренировке (заполняется при --workout). */
+export type LapRole = "warmup" | "active" | "rest" | "cooldown";
+
 export interface Lap extends SegmentStats {
   /** Номер круга, с 1. */
   index: number;
   /** Как круг закончился: manual, distance, time, sessionEnd… */
   trigger: string | null;
-  /** Тип по тренировке: active, rest, warmup, cooldown, interval… */
+  /** Тип по тренировке, как его записали часы: active, rest, warmup, interval… */
   intensity: string | null;
+  /** Роль по схеме --workout; null — схема не задана или полная разметка. */
+  role: LapRole | null;
+  /**
+   * Есть только у кругов с реальной дистанцией из схемы. Тогда distanceM и
+   * avgPace — по реальной дистанции, а здесь — исходные значения по GPS.
+   */
+  gpsDistanceM?: number | null;
+  gpsAvgPaceSecPerKm?: number | null;
+  gpsAvgPace?: string | null;
+}
+
+/** Результат применения схемы --workout. */
+export interface WorkoutInfo {
+  /** auto — найдена сама; manual — схема рабочих отрезков; manual-full — дистанция каждого круга. */
+  source: "auto" | "manual" | "manual-full";
+  /** Например "200 400 600 1000 600x3"; null — схему найти не удалось. */
+  tag: string | null;
+  /** Допуск округления до целой дистанции, % (только для auto). */
+  tolerancePct: number | null;
+  /** Реальные дистанции кругов с заданной длиной. */
+  distancesM: number[];
+  /** Номера кругов (с 1), у которых дистанция и темп заменены реальными. */
+  adjustedLapIndexes: number[];
+  adjustedDistanceM: number | null;
+  adjustedDurationSec: number | null;
+  adjustedAvgPaceSecPerKm: number | null;
+  adjustedAvgPace: string | null;
+  warnings: string[];
 }
 
 export interface KmSplit extends SegmentStats {
@@ -115,6 +148,8 @@ export interface WorkoutSource {
 export interface ParsedWorkout {
   source: WorkoutSource;
   summary: WorkoutSummary;
+  /** Схема интервалов; null — флаг --workout не задан. */
+  workout: WorkoutInfo | null;
   laps: Lap[];
   kmSplits: KmSplits;
   /** Можно не выводить: см. флаг --no-points в CLI. */

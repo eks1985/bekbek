@@ -1,19 +1,37 @@
 // Разбирает FIT-файлы тренировок и сохраняет результат в output/<имя>.json.
 // Использование:
 //   npm run fit:parse -- samples/activity.fit
-//   npm run fit:parse -- samples/                 (все .fit в папке)
-//   npm run fit:parse -- samples/ --no-points     (без посекундных точек)
-//   npm run fit:parse -- file.fit --out results   (другая папка вывода)
+//   npm run fit:parse -- samples/                          (все .fit в папке)
+//   npm run fit:parse -- file.fit --with-points            (с посекундными точками)
+//   npm run fit:parse -- file.fit --out results            (другая папка вывода)
+//   npm run fit:parse -- file.fit --workout auto           (найти схему интервалов)
+//   npm run fit:parse -- file.fit --workout auto --tolerance 3
+//   npm run fit:parse -- file.fit --workout "200 400 600x3"
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { parseWorkout, type ParsedWorkout } from "../src/lib/fit";
+import {
+  DEFAULT_TOLERANCE_PCT,
+  WorkoutPatternError,
+  parseWorkout,
+  parseWorkoutPattern,
+  type ParsedWorkout,
+  type WorkoutOption,
+} from "../src/lib/fit";
+
+class ArgsError extends Error {}
 
 async function main(): Promise<number> {
-  const { inputs, includePoints, outDir } = parseArgs(process.argv.slice(2));
-  if (inputs.length === 0) {
-    console.error("Укажите FIT-файл или папку: npm run fit:parse -- samples/activity.fit");
-    return 1;
+  let options: ReturnType<typeof parseArgs>;
+  try {
+    options = parseArgs(process.argv.slice(2));
+  } catch (error) {
+    if (error instanceof ArgsError || error instanceof WorkoutPatternError) {
+      console.error(error.message);
+      return 1;
+    }
+    throw error;
   }
+  const { inputs, outDir, ...parseOptions } = options;
 
   const files = (await Promise.all(inputs.map(collectFitFiles))).flat();
   if (files.length === 0) {
@@ -27,7 +45,7 @@ async function main(): Promise<number> {
   for (const file of files) {
     try {
       const bytes = await readFile(file);
-      const workout = parseWorkout(bytes, { fileName: path.basename(file), includePoints });
+      const workout = parseWorkout(bytes, { fileName: path.basename(file), ...parseOptions });
       const outFile = path.join(outDir, `${path.parse(file).name}.json`);
       await writeFile(outFile, JSON.stringify(workout, null, 2), "utf8");
       printSummary(file, outFile, workout);
@@ -42,15 +60,71 @@ async function main(): Promise<number> {
 
 function parseArgs(args: string[]) {
   const inputs: string[] = [];
-  let includePoints = true;
+  let includePoints = false;
   let outDir = "output";
+  let workout: WorkoutOption | undefined;
+  let tolerancePct = DEFAULT_TOLERANCE_PCT;
+
+  const valueOf = (i: number, flag: string) => {
+    const value = args[i];
+    if (value === undefined) throw new ArgsError(`После ${flag} нужно значение`);
+    return value;
+  };
+
+  assertNpmDidNotTakeFlags(args);
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--no-points") includePoints = false;
-    else if (args[i] === "--out") outDir = args[++i] ?? outDir;
-    else inputs.push(args[i]);
+    const arg = args[i];
+    if (arg === "--") {
+      // Лишний разделитель от `npm run fit:parse -- -- …` (обход для PowerShell).
+      continue;
+    } else if (arg === "--with-points") {
+      includePoints = true;
+    } else if (arg === "--out") {
+      outDir = valueOf(++i, arg);
+    } else if (arg === "--workout") {
+      const value = valueOf(++i, arg);
+      workout = value === "auto" ? "auto" : parseWorkoutPattern(value);
+    } else if (arg === "--tolerance") {
+      tolerancePct = Number(valueOf(++i, arg));
+      if (!(tolerancePct > 0 && tolerancePct < 50)) {
+        throw new ArgsError("--tolerance — процент больше 0 и меньше 50, например --tolerance 5");
+      }
+    } else if (arg.startsWith("--")) {
+      throw new ArgsError(`Неизвестный флаг ${arg}`);
+    } else {
+      inputs.push(arg);
+    }
   }
-  return { inputs, includePoints, outDir };
+
+  if (inputs.length === 0) {
+    throw new ArgsError("Укажите FIT-файл или папку: npm run fit:parse -- samples/activity.fit");
+  }
+  return { inputs, outDir, includePoints, workout, tolerancePct };
+}
+
+/**
+ * PowerShell при вызове npm (npm.ps1) выкидывает разделитель `--`, и npm
+ * забирает флаги себе: `--workout auto` превращается в настройку npm, а в
+ * скрипт доходит только "auto". npm при этом кладёт перехваченные флаги
+ * в переменные npm_config_*. Если видим такую — лучше честно упасть, чем
+ * молча разобрать файл без схемы.
+ */
+function assertNpmDidNotTakeFlags(args: string[]) {
+  const flags = ["workout", "with-points", "tolerance", "out"];
+  const taken = flags.filter(
+    (flag) =>
+      process.env[`npm_config_${flag.replace("-", "_")}`] !== undefined &&
+      !args.includes(`--${flag}`),
+  );
+  if (taken.length === 0) return;
+
+  throw new ArgsError(
+    `Флаги ${taken.map((f) => `--${f}`).join(", ")} не дошли до скрипта: их перехватил npm ` +
+      "(PowerShell убирает разделитель --).\nЗапустите одним из способов:\n" +
+      "  npm run fit:parse -- -- samples/файл.fit --workout auto\n" +
+      "  npx tsx scripts/parse-fit.ts samples/файл.fit --workout auto",
+  );
 }
 
 /** Файл → [файл]; папка → все .fit в ней. */
@@ -67,7 +141,11 @@ async function collectFitFiles(input: string): Promise<string[]> {
     .map((name) => path.join(input, name));
 }
 
-function printSummary(file: string, outFile: string, { summary: s, laps, kmSplits }: ParsedWorkout) {
+function printSummary(
+  file: string,
+  outFile: string,
+  { summary: s, workout, laps, kmSplits }: ParsedWorkout,
+) {
   const km = s.distanceM === null ? "—" : (s.distanceM / 1000).toFixed(2);
   console.log(`✓ ${file} → ${path.relative(process.cwd(), outFile)}`);
   console.log(
@@ -76,6 +154,11 @@ function printSummary(file: string, outFile: string, { summary: s, laps, kmSplit
       `набор ${s.totalAscentM ?? "—"} м · кругов ${laps.length} · ` +
       `сплитов ${kmSplits.items.length} (${kmSplits.source})`,
   );
+  if (workout) {
+    const pace = workout.adjustedAvgPace ? ` · темп отрезков ${workout.adjustedAvgPace}/км` : "";
+    console.log(`  схема: ${workout.tag ?? "не найдена"} (${workout.source})${pace}`);
+    for (const warning of workout.warnings) console.log(`  ⚠ ${warning}`);
+  }
 }
 
 main().then((code) => {

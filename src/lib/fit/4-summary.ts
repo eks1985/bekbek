@@ -24,6 +24,7 @@ export function extractSummary(messages: FitMessages, points: Point[]): WorkoutS
     sport,
     subSport: enumToString(session?.subSport),
     profileName: session?.sportProfileName ?? null,
+    workoutTag: null, // заполняется в шаге 7, если задан --workout
     startTimeLocal: toLocalTime(stats.startTime, messages),
     ...stats,
     cadenceUnit: isStepSport(sport) ? "spm" : "rpm",
