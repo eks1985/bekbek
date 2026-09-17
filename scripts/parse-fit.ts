@@ -156,7 +156,8 @@ function printSummary(
   );
   if (workout) {
     const pace = workout.adjustedAvgPace ? ` · темп отрезков ${workout.adjustedAvgPace}/км` : "";
-    console.log(`  схема: ${workout.tag ?? "не найдена"} (${workout.source})${pace}`);
+    const noTag = workout.source === "auto" ? "не найдена" : "не задана";
+    console.log(`  схема: ${workout.tag ?? noTag} (${workout.source})${pace}`);
     for (const warning of workout.warnings) console.log(`  ⚠ ${warning}`);
   }
 }

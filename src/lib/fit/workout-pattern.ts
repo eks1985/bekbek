@@ -6,18 +6,31 @@ export class WorkoutPatternError extends Error {}
 /** Допуск по умолчанию для поиска «целой» дистанции, %. */
 export const DEFAULT_TOLERANCE_PCT = 5;
 
+/** Элемент схемы: дистанция в метрах или null — «взять дистанцию круга из файла». */
+export type WorkoutPatternItem = number | null;
+
 /**
  * "200 400 600x3" → [200, 400, 600, 600, 600].
+ * "-200-400-"     → [null, 200, null, 400, null].
  * Разделители — пробелы или запятые; повтор — x (латинская или русская) или ×.
+ * Дефис — «дистанция из файла» и заодно разделитель: "-200-" = "- 200 -".
+ * Дефисы допустимы только в полной разметке (это проверяет шаг 7).
  */
-export function parseWorkoutPattern(text: string): number[] {
-  const tokens = text.split(/[\s,]+/).filter(Boolean);
+export function parseWorkoutPattern(text: string): WorkoutPatternItem[] {
+  const tokens = text
+    .split(/[\s,]+/)
+    .flatMap((chunk) => chunk.split(/(-)/))
+    .filter(Boolean);
   if (tokens.length === 0) {
     throw new WorkoutPatternError('Схема пустая. Пример: --workout "200 400 600x3"');
   }
 
-  const distances: number[] = [];
+  const distances: WorkoutPatternItem[] = [];
   for (const token of tokens) {
+    if (token === "-") {
+      distances.push(null);
+      continue;
+    }
     const match = /^(\d+(?:\.\d+)?)(?:[xх×](\d+))?$/i.exec(token);
     const distance = Number(match?.[1]);
     const repeat = match?.[2] ? Number(match[2]) : 1;

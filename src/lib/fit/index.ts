@@ -6,5 +6,6 @@ export {
   WorkoutPatternError,
   formatWorkoutTag,
   parseWorkoutPattern,
+  type WorkoutPatternItem,
 } from "./workout-pattern";
 export type * from "./types";

@@ -8,8 +8,9 @@
 //   auto          — ищем схему сами (workout-detect.ts);
 //   схема отрезков — "200 400 600x3": дистанции рабочих кругов 2, 4, 6…,
 //                    между ними отдых, круг 1 — разминка;
-//   полная разметка — чисел ровно столько, сколько кругов в файле
-//                    (фартлек): дистанция задана для каждого круга.
+//   полная разметка — значений ровно столько, сколько кругов в файле
+//                    (фартлек): дистанция задана для каждого круга;
+//                    "-" вместо числа — оставить дистанцию из файла.
 
 import type { Lap, LapRole, WorkoutInfo } from "./types";
 import { formatPace, round } from "./units";
@@ -19,9 +20,10 @@ import {
   WorkoutPatternError,
   deviationPct,
   formatWorkoutTag,
+  type WorkoutPatternItem,
 } from "./workout-pattern";
 
-export type WorkoutOption = "auto" | number[];
+export type WorkoutOption = "auto" | WorkoutPatternItem[];
 
 /** Если GPS расходится со схемой сильнее, скорее всего схема не та. */
 const SUSPICIOUS_DEVIATION_PCT = 20;
@@ -34,7 +36,13 @@ export function applyWorkout(
   if (option === undefined) return { laps, workout: null };
   if (option === "auto") return applyAuto(laps, tolerancePct);
   if (option.length === laps.length) return applyFullMarkup(laps, option);
-  return applyActivePattern(laps, option);
+  if (option.includes(null)) {
+    throw new WorkoutPatternError(
+      `«-» (дистанция из файла) можно ставить только в полной разметке: ` +
+        `в файле ${laps.length} кругов, а в схеме ${option.length} значений`,
+    );
+  }
+  return applyActivePattern(laps, option as number[]);
 }
 
 // ─── Режимы ──────────────────────────────────────────────────────────────────
@@ -71,10 +79,16 @@ function applyActivePattern(laps: Lap[], distancesM: number[]) {
   return applyDistances(laps, "manual", activeIndexes, distancesM, { warnings, withRoles: true });
 }
 
-function applyFullMarkup(laps: Lap[], distancesM: number[]) {
-  const allIndexes = laps.map((_, i) => i);
-  const warnings = deviationWarnings(laps, allIndexes, distancesM);
-  return applyDistances(laps, "manual-full", allIndexes, distancesM, { warnings, withRoles: false });
+function applyFullMarkup(laps: Lap[], items: WorkoutPatternItem[]) {
+  // Круги с "-" пропускаем: у них остаются дистанция и темп из файла,
+  // в тег и итоги схемы они не попадают.
+  const indexes = items.flatMap((item, i) => (item === null ? [] : [i]));
+  const distancesM = indexes.map((i) => items[i] as number);
+  const warnings = deviationWarnings(laps, indexes, distancesM);
+  if (indexes.length === 0) {
+    warnings.push("Во всех кругах стоит «-» — пересчитывать нечего");
+  }
+  return applyDistances(laps, "manual-full", indexes, distancesM, { warnings, withRoles: false });
 }
 
 // ─── Общая часть ─────────────────────────────────────────────────────────────
