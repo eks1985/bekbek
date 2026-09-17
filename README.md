@@ -69,6 +69,20 @@ MAIL_FROM_NAME=Вход
 Холодный старт SSR Next.js на serverless ~9 c — на кнопке «Получить код» уже
 стоит pending-стейт, чтобы пользователь не жал её повторно.
 
+## Парсер FIT-файлов тренировок
+
+```bash
+npm run fit:parse -- samples/24300728659_ACTIVITY.fit   # → output/24300728659_ACTIVITY.json
+npm run fit:parse -- samples/                           # все .fit в папке
+npm run fit:parse -- samples/ --no-points --out results # без посекундных точек, в другую папку
+```
+
+В JSON: `source` (устройство), `summary` (итоги тренировки), `laps` (все круги),
+`kmSplits` (сплиты по 1 км: из автокругов часов или посчитанные по точкам) и
+`points` (точки записи). Бинарный формат читает официальный `@garmin/fitsdk`,
+остальное — `src/lib/fit/`: файлы с номерами `1-…6-` — шаги по порядку,
+`parse-workout.ts` вызывает их по очереди.
+
 ## Структура
 
 ```

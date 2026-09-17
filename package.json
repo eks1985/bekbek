@@ -13,10 +13,12 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "user:add": "node scripts/create-user.mjs"
+    "user:add": "node scripts/create-user.mjs",
+    "fit:parse": "tsx scripts/parse-fit.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@garmin/fitsdk": "^21.214.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "class-variance-authority": "^0.7.1",
@@ -42,6 +44,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }
