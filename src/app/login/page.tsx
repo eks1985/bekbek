@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Logo, PoweredBy } from "@/components/logo";
 import {
   Card,
   CardContent,
@@ -69,71 +70,75 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Вход</CardTitle>
-          <CardDescription>
-            {step === "email"
-              ? "Введите email — пришлём код для входа."
-              : `Код отправлен на ${email}. Введите его ниже.`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {step === "email" ? (
-            <form onSubmit={requestCode} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                />
-              </div>
-              <Button type="submit" disabled={pending}>
-                {pending ? "Отправляем…" : "Получить код"}
-              </Button>
-            </form>
-          ) : (
-            <form onSubmit={verify} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="code">Код из письма</Label>
-                <Input
-                  id="code"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="\d{6}"
-                  maxLength={6}
-                  required
-                  value={code}
-                  onChange={(e) =>
-                    setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
-                  }
-                  placeholder="000000"
-                />
-              </div>
-              <Button type="submit" disabled={pending || code.length !== 6}>
-                {pending ? "Проверяем…" : "Войти"}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={pending}
-                onClick={() => {
-                  setCode("");
-                  setStep("email");
-                }}
-              >
-                Изменить email
-              </Button>
-            </form>
-          )}
-        </CardContent>
-      </Card>
+    <main className="flex min-h-screen flex-col items-center p-4">
+      <div className="flex w-full flex-1 flex-col items-center justify-center gap-6">
+        <Logo />
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle>Вход</CardTitle>
+            <CardDescription>
+              {step === "email"
+                ? "Введите email — пришлём код для входа."
+                : `Код отправлен на ${email}. Введите его ниже.`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {step === "email" ? (
+              <form onSubmit={requestCode} className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </div>
+                <Button type="submit" disabled={pending}>
+                  {pending ? "Отправляем…" : "Получить код"}
+                </Button>
+              </form>
+            ) : (
+              <form onSubmit={verify} className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="code">Код из письма</Label>
+                  <Input
+                    id="code"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="\d{6}"
+                    maxLength={6}
+                    required
+                    value={code}
+                    onChange={(e) =>
+                      setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                    }
+                    placeholder="000000"
+                  />
+                </div>
+                <Button type="submit" disabled={pending || code.length !== 6}>
+                  {pending ? "Проверяем…" : "Войти"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={() => {
+                    setCode("");
+                    setStep("email");
+                  }}
+                >
+                  Изменить email
+                </Button>
+              </form>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+      <PoweredBy className="pt-6" />
     </main>
   );
 }
