@@ -46,3 +46,4 @@ next-env.d.ts
 
 # результаты парсера FIT (npm run fit:parse)
 /output
+/samples
