@@ -40,9 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# auth-скелет: оставляем шаблон env и CA-сертификат Yandex в репозитории
+# шаблон env без секретов — в репозитории
 !.env.example
-!certs/*.crt
 
 # результаты парсера FIT (npm run fit:parse)
 /output

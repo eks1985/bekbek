@@ -24,6 +24,7 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env.DATABASE_URL,
+    // Та же база, что у приложения (см. src/lib/db.ts).
+    url: process.env.LAYERO_DATABASE_URL || process.env.DATABASE_URL,
   },
 });

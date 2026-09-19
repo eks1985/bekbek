@@ -6,8 +6,8 @@
 
 **Стек:** Next.js 16 (App Router) · Prisma 7 (driver adapter + node-pg) ·
 PostgreSQL · Tailwind v4 · shadcn/ui. Крипта — `node:crypto`, без
-auth-библиотек. Хостинг — Layero (serverless), боевая БД — Yandex Managed
-PostgreSQL, почта — Notisend HTTP API.
+auth-библиотек. Хостинг — Layero (serverless), боевая БД — PostgreSQL на
+Layero, почта — Notisend HTTP API.
 
 ## Как это устроено
 
@@ -57,17 +57,119 @@ MAIL_FROM_NAME=Вход
 
 1. Тариф **Pro** (512 MB RAM — SSR Next.js на 256 ловит OOM; домен и индексация
    тоже только Pro). Runtime type определится как `ssr_next`.
-2. **База:** Yandex Managed PostgreSQL. Скачайте CA-сертификат (см.
-   [`certs/README.md`](certs/README.md)).
-3. **Env vars** в дашборде Layero: `DATABASE_URL` (строка YC),
-   `DATABASE_CA_PATH=./certs/yandex-root.crt` (node-pg проверяет сертификат по
-   этому файлу; размер пула задан в коде — `max=3`), `SESSION_COOKIE_SECURE=true`,
+2. **База:** PostgreSQL на Layero (база `bek-bek`), подключена к проекту.
+   Строку подключения платформа сама кладёт в `LAYERO_DATABASE_URL`, и код
+   (`src/lib/db.ts`, `prisma.config.ts`, `scripts/create-user.mjs`) берёт её
+   первой, а `DATABASE_URL` — только если её нет (локально). TLS обязателен;
+   на Layero `sslmode` уже в строке, сертификат Let's Encrypt node-pg проверяет
+   по системным корням — CA-файл не нужен. Размер пула
+   задан в коде — `max=3`.
+3. **Env vars** в дашборде Layero: `SESSION_COOKIE_SECURE=true`,
    `MAILER=notisend`, `NOTISEND_API_KEY`, `MAIL_FROM`, `MAIL_FROM_NAME`, `APP_URL`.
+   `DATABASE_URL` в проекте не задавайте.
 4. **Миграции** накатывайте против прод-БД отдельно — `npm run db:deploy` —
    а не во время сборки Layero (не завязываем билд на доступность БД).
+   Порядок — в разделе «Изменение таблиц БД» ниже.
+5. **Выкладка кода** — push в `main` на GitLab: вебхук запускает сборку на
+   Layero, через 2–3 минуты новая версия на https://bek-bek.layero.app. Если
+   сборка упала, живой остаётся предыдущая версия.
 
 Холодный старт SSR Next.js на serverless ~9 c — на кнопке «Получить код» уже
 стоит pending-стейт, чтобы пользователь не жал её повторно.
+
+## Изменение таблиц БД (миграции Prisma)
+
+Две команды, и у каждой своя база:
+
+- `npm run db:migrate` (`prisma migrate dev`) — **только локальная база**.
+  Сравнивает `schema.prisma` с базой, создаёт файл миграции в
+  `prisma/migrations/` и сразу применяет его локально.
+- `npm run db:deploy` (`prisma migrate deploy`) — **прод**. Новых миграций
+  не создаёт, только применяет ещё не накатанные файлы из `prisma/migrations/`.
+  Базу не сбрасывает, ничего не спрашивает.
+
+Layero при сборке миграции не запускает (`build` = `prisma generate && next build`),
+их накатывают вручную.
+
+### Порядок
+
+1. Правим `prisma/schema.prisma`.
+2. Создаём миграцию и применяем её к локальной базе:
+   ```powershell
+   npm run db:migrate -- --name add_user_nickname
+   ```
+   Смотрим сгенерированный `prisma/migrations/<дата>_add_user_nickname/migration.sql` —
+   именно этот SQL выполнится на проде.
+3. Проверяем локально: `npm run dev`.
+4. Коммитим `schema.prisma` **вместе с папкой миграции** — без неё прод о
+   изменении не узнает.
+5. Накатываем миграцию на прод (см. ниже).
+6. `git push` в `main` — Layero соберёт новый код.
+
+### Накатить на прод
+
+Нужны:
+
+- **доступ снаружи** — вкладка «Сеть» базы: «Список адресов» с вашим IP или
+  «Открыто всем»;
+- **строка подключения с паролем** — панель → база → «Подключить», роль
+  «Владелец базы», «Показать пароль» → «Скопировать». Выглядит так:
+  `postgresql://mgr_bekbek_owner:ПАРОЛЬ@db.layero.ru:5432/mgr_bekbek?sslmode=require`.
+  CLI (`layero db list`) отдаёт ту же строку, но с заглушкой `<пароль>` —
+  для подключения она не годится.
+
+`prisma.config.ts` берёт `DATABASE_URL` из `.env.local`, но переменная,
+заданная в терминале, важнее (`process.loadEnvFile` её не перезаписывает).
+Прод-адрес кладём в переменную только на время команды. Пароль держим во
+временном файле, чтобы не светить его в истории PowerShell:
+
+```powershell
+# 1. Строка из панели — во временный файл (после «Скопировать»)
+Get-Clipboard | Set-Content C:\Users\kefimov\bek-bek-prod-db.txt
+
+cd C:\Documents\apps\bek-bek
+$env:DATABASE_URL = (Get-Content C:\Users\kefimov\bek-bek-prod-db.txt -Raw).Trim()
+
+# 2. Что не накатано — ничего не меняет
+npx prisma migrate status
+# 3. Накатить
+npm run db:deploy
+# при необходимости — пользователь для входа
+npm run user:add -- you@example.com
+
+# 4. Убрать за собой
+Remove-Item Env:DATABASE_URL
+Remove-Item C:\Users\kefimov\bek-bek-prod-db.txt
+```
+
+В выводе Prisma должно стоять `Datasource "db": … "mgr_bekbek" … at "db.layero.ru:5432"` —
+значит, команда смотрит в прод, а не в локальную базу.
+
+Проверить результат можно без пароля, через CLI Layero:
+
+```powershell
+npx layero@latest db sql bek-bek -c "select migration_name, finished_at from _prisma_migrations"
+npx layero@latest db sql bek-bek -c "select table_name from information_schema.tables where table_schema='public'"
+```
+
+⚠️ Не оставляйте прод-адрес в переменной: следующий `npm run dev` или
+`db:migrate` в том же окне пойдёт в прод-базу, а `migrate dev` при расхождении
+может предложить **сбросить базу**. По той же причине не прописывайте
+`LAYERO_DATABASE_URL` в `.env.local` — она приоритетнее `DATABASE_URL`.
+
+**TLS.** Без шифрования база Layero не пускает. Если Prisma ругается на
+проверку сертификата, скачайте корень Let's Encrypt (ISRG Root X1,
+https://letsencrypt.org/certs/isrgrootx1.pem) и допишите путь к нему в строку:
+`…?sslmode=verify-full&sslrootcert=C:/путь/к/isrgrootx1.pem`.
+
+### Что сначала — миграция или код
+
+- **Только добавляем** (новая таблица, поле с `?` или со значением по умолчанию) —
+  сначала миграция, потом push: старый код новое поле просто не заметит.
+- **Удаляем или переименовываем** — в два шага: сначала код, который старое
+  поле больше не использует, потом отдельной миграцией удаление. Иначе между
+  миграцией и окончанием сборки живой сайт будет обращаться к колонке,
+  которой уже нет.
 
 ## Парсер FIT-файлов тренировок
 

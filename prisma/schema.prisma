@@ -1,5 +1,5 @@
 // Схема БД для email-OTP авторизации.
-// Боевая база — Yandex Managed PostgreSQL, локально — свой Postgres.
+// Боевая база — PostgreSQL на Layero, локально — свой Postgres.
 generator client {
   provider = "prisma-client-js"
 }

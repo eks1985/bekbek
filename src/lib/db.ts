@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
@@ -8,23 +7,21 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createClient(): PrismaClient {
-  const connectionString = process.env.DATABASE_URL;
+  // На Layero строку подключения к базе платформа кладёт в LAYERO_DATABASE_URL
+  // (в DATABASE_URL она не пишет, чтобы не перекрыть переменную пользователя).
+  // Локально этой переменной нет — берём DATABASE_URL из .env.local.
+  const connectionString =
+    process.env.LAYERO_DATABASE_URL || process.env.DATABASE_URL;
   if (!connectionString) {
-    throw new Error("DATABASE_URL не задан");
+    throw new Error("Не задан LAYERO_DATABASE_URL или DATABASE_URL");
   }
 
-  // TLS для Yandex Managed PostgreSQL: node-pg не читает sslrootcert из URL,
-  // поэтому CA передаём файлом. Путь — в DATABASE_CA_PATH (см. certs/README.md).
-  // Без переменной (локальный Postgres) идём без ssl.
-  const caPath = process.env.DATABASE_CA_PATH;
-  const ssl = caPath
-    ? { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true }
-    : undefined;
-
+  // TLS задаётся самой строкой: у базы Layero в ней sslmode, а сертификат
+  // (Let's Encrypt) node-pg проверяет по системным корням Node. Локальный
+  // Postgres — строка без sslmode, без шифрования.
   const adapter = new PrismaPg({
     connectionString,
     max: 3, // маленький пул под serverless
-    ssl,
   });
 
   return new PrismaClient({

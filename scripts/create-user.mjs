@@ -1,6 +1,5 @@
 // Заводит пользователя (вход разрешён только заранее зарегистрированным).
 // Использование: npm run user:add -- you@example.com
-import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
@@ -26,18 +25,15 @@ if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
   process.exit(1);
 }
 
-const connectionString = process.env.DATABASE_URL;
+// Та же база, что у приложения (см. src/lib/db.ts): LAYERO_DATABASE_URL, иначе DATABASE_URL.
+const connectionString =
+  process.env.LAYERO_DATABASE_URL || process.env.DATABASE_URL;
 if (!connectionString) {
-  console.error("DATABASE_URL не задан (проверьте .env.local)");
+  console.error("Не задан LAYERO_DATABASE_URL или DATABASE_URL (проверьте .env.local)");
   process.exit(1);
 }
 
-const caPath = process.env.DATABASE_CA_PATH;
-const ssl = caPath
-  ? { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true }
-  : undefined;
-
-const adapter = new PrismaPg({ connectionString, ssl });
+const adapter = new PrismaPg({ connectionString });
 const db = new PrismaClient({ adapter });
 
 const user = await db.user.upsert({
