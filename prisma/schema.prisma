@@ -15,8 +15,60 @@ model User {
   email     String    @unique // всегда в нижнем регистре
   createdAt DateTime  @default(now())
   sessions  Session[]
+  fitFiles  FitFile[]
+  workouts  Workout[]
 
   @@map("users")
+}
+
+/// Загруженный FIT-файл. Сам файл лежит в Selectel S3, здесь — ключ объекта.
+model FitFile {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storageKey   String   @unique // напр. "fit/<userId>/<id>.fit"
+  originalName String // имя файла у пользователя
+  sizeBytes    Int
+  sha256       String // хеш содержимого — чтобы не загрузить один файл дважды
+  uploadedAt   DateTime @default(now())
+  workout      Workout?
+
+  @@unique([userId, sha256])
+  @@index([userId, uploadedAt])
+  @@map("fit_files")
+}
+
+/// Результат парсинга FIT-файла (без посекундных точек).
+/// Весь результат — в data (jsonb), поля для фильтров продублированы колонками.
+/// Новый фильтр = новая колонка + миграция, заполняющая её из data.
+model Workout {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fitFileId String  @unique // один файл — один результат; повторный разбор перезаписывает
+  fitFile   FitFile @relation(fields: [fitFileId], references: [id], onDelete: Cascade)
+
+  title String? // название от пользователя; null — показываем дату и тег
+
+  // Колонки для фильтров и сортировки — копии полей из data.summary
+  startTime       DateTime // summary.startTime (UTC)
+  sport           String?
+  distanceM       Float?
+  durationSec     Float?
+  avgPaceSecPerKm Float?
+  avgHeartRate    Int?
+  workoutTag      String?
+
+  data          Json // ParsedWorkout без points
+  parserVersion Int // растёт при смене формата data — видно, что переразбирать
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, startTime])
+  @@index([userId, workoutTag])
+  @@index([userId, distanceM])
+  @@map("workouts")
 }
 
 /// Одноразовые коды входа. Хранится только хеш кода, не сам код.
