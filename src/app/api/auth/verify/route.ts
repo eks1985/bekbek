@@ -33,12 +33,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  // Код валиден — пользователь обязан существовать (мог быть удалён между
-  // запросом кода и проверкой; тогда трактуем как неверный код).
-  const user = await db.user.findUnique({ where: { email } });
-  if (!user) {
-    return NextResponse.json({ error: "Неверный код." }, { status: 400 });
-  }
+  // Код верный — значит, почта принадлежит человеку. Новый пользователь
+  // создаётся здесь, при первом входе; существующий просто находится.
+  const user = await db.user.upsert({
+    where: { email },
+    update: {},
+    create: { email },
+  });
 
   await createSession(user.id);
 

@@ -1,4 +1,5 @@
-// Заводит пользователя (вход разрешён только заранее зарегистрированным).
+// Заводит пользователя заранее. Необязательно: при первом входе по коду
+// пользователь создаётся сам (см. src/app/api/auth/verify/route.ts).
 // Использование: npm run user:add -- you@example.com
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";

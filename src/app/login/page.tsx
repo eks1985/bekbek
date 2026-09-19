@@ -38,7 +38,7 @@ export default function LoginPage() {
         toast.error(data.error ?? "Не удалось отправить код");
         return;
       }
-      toast.success("Если email зарегистрирован, код отправлен.");
+      toast.success("Код отправлен на почту.");
       setStep("code");
     } catch {
       toast.error("Сеть недоступна. Попробуйте ещё раз.");
