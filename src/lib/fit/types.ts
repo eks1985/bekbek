@@ -113,6 +113,8 @@ export interface WorkoutInfo {
   tag: string | null;
   /** Допуск округления до целой дистанции, % (только для auto). */
   tolerancePct: number | null;
+  /** Сколько первых кругов считались разминкой (только для auto). */
+  warmupLaps: number | null;
   /** Реальные дистанции кругов с заданной длиной. */
   distancesM: number[];
   /** Номера кругов (с 1), у которых дистанция и темп заменены реальными. */

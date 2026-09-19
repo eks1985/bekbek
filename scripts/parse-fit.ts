@@ -6,6 +6,7 @@
 //   npm run fit:parse -- file.fit --out results            (другая папка вывода)
 //   npm run fit:parse -- file.fit --workout auto           (найти схему интервалов)
 //   npm run fit:parse -- file.fit --workout auto --tolerance 3
+//   npm run fit:parse -- file.fit --workout auto --warmup 3   (разминка — первые 3 круга)
 //   npm run fit:parse -- file.fit --workout "200 400 600x3"
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -64,6 +65,7 @@ function parseArgs(args: string[]) {
   let outDir = "output";
   let workout: WorkoutOption | undefined;
   let tolerancePct = DEFAULT_TOLERANCE_PCT;
+  let warmupLaps: number | undefined;
 
   const valueOf = (i: number, flag: string) => {
     const value = args[i];
@@ -90,6 +92,11 @@ function parseArgs(args: string[]) {
       if (!(tolerancePct > 0 && tolerancePct < 50)) {
         throw new ArgsError("--tolerance — процент больше 0 и меньше 50, например --tolerance 5");
       }
+    } else if (arg === "--warmup") {
+      warmupLaps = Number(valueOf(++i, arg));
+      if (!Number.isInteger(warmupLaps) || warmupLaps < 0) {
+        throw new ArgsError("--warmup — число кругов разминки: целое, 0 или больше, например --warmup 3");
+      }
     } else if (arg.startsWith("--")) {
       throw new ArgsError(`Неизвестный флаг ${arg}`);
     } else {
@@ -100,7 +107,11 @@ function parseArgs(args: string[]) {
   if (inputs.length === 0) {
     throw new ArgsError("Укажите FIT-файл или папку: npm run fit:parse -- samples/activity.fit");
   }
-  return { inputs, outDir, includePoints, workout, tolerancePct };
+  if (warmupLaps !== undefined && workout !== "auto") {
+    // В ручной схеме разминка — всегда первый круг, в полной разметке задаётся сама.
+    throw new ArgsError("--warmup работает только с --workout auto");
+  }
+  return { inputs, outDir, includePoints, workout, tolerancePct, warmupLaps };
 }
 
 /**
@@ -111,7 +122,7 @@ function parseArgs(args: string[]) {
  * молча разобрать файл без схемы.
  */
 function assertNpmDidNotTakeFlags(args: string[]) {
-  const flags = ["workout", "with-points", "tolerance", "out"];
+  const flags = ["workout", "with-points", "tolerance", "warmup", "out"];
   const taken = flags.filter(
     (flag) =>
       process.env[`npm_config_${flag.replace("-", "_")}`] !== undefined &&
@@ -157,7 +168,8 @@ function printSummary(
   if (workout) {
     const pace = workout.adjustedAvgPace ? ` · темп отрезков ${workout.adjustedAvgPace}/км` : "";
     const noTag = workout.source === "auto" ? "не найдена" : "не задана";
-    console.log(`  схема: ${workout.tag ?? noTag} (${workout.source})${pace}`);
+    const warmup = workout.warmupLaps === null ? "" : `, разминка — кругов: ${workout.warmupLaps}`;
+    console.log(`  схема: ${workout.tag ?? noTag} (${workout.source}${warmup})${pace}`);
     for (const warning of workout.warnings) console.log(`  ⚠ ${warning}`);
   }
 }

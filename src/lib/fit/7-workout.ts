@@ -5,7 +5,8 @@
 // пересчитываем по ней: время круга / реальная дистанция.
 //
 // Три режима:
-//   auto          — ищем схему сами (workout-detect.ts);
+//   auto          — ищем схему сами (workout-detect.ts); первые warmupLaps
+//                    кругов (по умолчанию 1) — разминка;
 //   схема отрезков — "200 400 600x3": дистанции рабочих кругов 2, 4, 6…,
 //                    между ними отдых, круг 1 — разминка;
 //   полная разметка — значений ровно столько, сколько кругов в файле
@@ -25,16 +26,29 @@ import {
 
 export type WorkoutOption = "auto" | WorkoutPatternItem[];
 
+/** Настройки режима auto; в ручных режимах не используются. */
+export interface AutoOptions {
+  /** Допуск округления до целой дистанции, %. */
+  tolerancePct?: number;
+  /** Сколько первых кругов — разминка; схема ищется с круга warmupLaps + 1. */
+  warmupLaps?: number;
+}
+
+type ResolvedAutoOptions = Required<AutoOptions>;
+
+/** По умолчанию разминка — один первый круг. */
+export const DEFAULT_WARMUP_LAPS = 1;
+
 /** Если GPS расходится со схемой сильнее, скорее всего схема не та. */
 const SUSPICIOUS_DEVIATION_PCT = 20;
 
 export function applyWorkout(
   laps: Lap[],
   option: WorkoutOption | undefined,
-  tolerancePct = DEFAULT_TOLERANCE_PCT,
+  { tolerancePct = DEFAULT_TOLERANCE_PCT, warmupLaps = DEFAULT_WARMUP_LAPS }: AutoOptions = {},
 ): { laps: Lap[]; workout: WorkoutInfo | null } {
   if (option === undefined) return { laps, workout: null };
-  if (option === "auto") return applyAuto(laps, tolerancePct);
+  if (option === "auto") return applyAuto(laps, { tolerancePct, warmupLaps });
   if (option.length === laps.length) return applyFullMarkup(laps, option);
   if (option.includes(null)) {
     throw new WorkoutPatternError(
@@ -47,18 +61,18 @@ export function applyWorkout(
 
 // ─── Режимы ──────────────────────────────────────────────────────────────────
 
-function applyAuto(laps: Lap[], tolerancePct: number) {
-  const detected = detectWorkout(laps, tolerancePct);
+function applyAuto(laps: Lap[], auto: ResolvedAutoOptions) {
+  const detected = detectWorkout(laps, auto.tolerancePct, auto.warmupLaps);
   if (!detected.distancesM) {
     // Схему не нашли — круги не трогаем, только сообщаем почему.
     return {
       laps,
-      workout: buildInfo("auto", laps, [], [], detected.warnings, tolerancePct),
+      workout: buildInfo("auto", laps, [], [], detected.warnings, auto),
     };
   }
   return applyDistances(laps, "auto", detected.activeIndexes, detected.distancesM, {
     warnings: detected.warnings,
-    tolerancePct,
+    auto,
     withRoles: true,
   });
 }
@@ -98,13 +112,15 @@ function applyDistances(
   source: WorkoutInfo["source"],
   adjustedIndexes: number[],
   distancesM: number[],
-  { warnings, tolerancePct = null, withRoles }: {
+  { warnings, auto = null, withRoles }: {
     warnings: string[];
-    tolerancePct?: number | null;
+    auto?: ResolvedAutoOptions | null;
     withRoles: boolean;
   },
 ) {
-  const roles = withRoles ? assignRoles(laps.length, adjustedIndexes) : null;
+  // Разминка в ручной схеме — всегда первый круг; в auto — сколько задано.
+  const warmupLaps = auto?.warmupLaps ?? DEFAULT_WARMUP_LAPS;
+  const roles = withRoles ? assignRoles(laps.length, adjustedIndexes, warmupLaps) : null;
   const distanceByIndex = new Map(adjustedIndexes.map((lapIndex, k) => [lapIndex, distancesM[k]]));
 
   const adjusted = laps.map((lap, i) => {
@@ -115,7 +131,7 @@ function applyDistances(
 
   return {
     laps: adjusted,
-    workout: buildInfo(source, adjusted, adjustedIndexes, distancesM, warnings, tolerancePct),
+    workout: buildInfo(source, adjusted, adjustedIndexes, distancesM, warnings, auto),
   };
 }
 
@@ -135,16 +151,16 @@ function withRealDistance(lap: Lap, distanceM: number): Lap {
 }
 
 /**
- * Круг 1 — разминка, дальше рабочий / отдых по очереди.
+ * Первые warmupLaps кругов — разминка, дальше рабочий / отдых по очереди.
  * После последнего рабочего: следующий круг — отдых, если за ним есть ещё
  * круги; всё остальное — заминка.
  */
-function assignRoles(lapCount: number, activeIndexes: number[]): LapRole[] {
+function assignRoles(lapCount: number, activeIndexes: number[], warmupLaps: number): LapRole[] {
   const active = new Set(activeIndexes);
   const lastActive = activeIndexes.at(-1) ?? 0;
 
   return Array.from({ length: lapCount }, (_, i): LapRole => {
-    if (i === 0) return "warmup";
+    if (i < warmupLaps) return "warmup";
     if (i <= lastActive) return active.has(i) ? "active" : "rest";
     if (i === lastActive + 1 && i < lapCount - 1) return "rest";
     return "cooldown";
@@ -157,7 +173,7 @@ function buildInfo(
   adjustedIndexes: number[],
   distancesM: number[],
   warnings: string[],
-  tolerancePct: number | null,
+  auto: ResolvedAutoOptions | null,
 ): WorkoutInfo {
   const adjusted = adjustedIndexes.map((i) => laps[i]);
   const distanceM = sum(adjusted.map((lap) => lap.distanceM));
@@ -167,7 +183,8 @@ function buildInfo(
   return {
     source,
     tag: distancesM.length ? formatWorkoutTag(distancesM) : null,
-    tolerancePct,
+    tolerancePct: auto?.tolerancePct ?? null,
+    warmupLaps: auto?.warmupLaps ?? null,
     distancesM,
     adjustedLapIndexes: adjusted.map((lap) => lap.index),
     adjustedDistanceM: distanceM === null ? null : round(distanceM, 2),

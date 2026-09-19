@@ -18,6 +18,8 @@ export interface ParseOptions {
   workout?: WorkoutOption;
   /** Допуск округления до целой дистанции для auto, %. По умолчанию 5. */
   tolerancePct?: number;
+  /** Сколько первых кругов — разминка (только для auto). По умолчанию 1. */
+  warmupLaps?: number;
 }
 
 export function parseWorkout(bytes: Uint8Array, options: ParseOptions = {}): ParsedWorkout {
@@ -42,7 +44,10 @@ export function parseWorkout(bytes: Uint8Array, options: ParseOptions = {}): Par
   const kmSplits = getKmSplits(gpsLaps, points);
 
   // 7. Схема интервалов: реальные дистанции и темп рабочих отрезков
-  const { laps, workout } = applyWorkout(gpsLaps, options.workout, options.tolerancePct);
+  const { laps, workout } = applyWorkout(gpsLaps, options.workout, {
+    tolerancePct: options.tolerancePct,
+    warmupLaps: options.warmupLaps,
+  });
 
   return {
     source: extractSource(messages, options.fileName ?? null, profileVersion),

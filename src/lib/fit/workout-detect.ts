@@ -1,11 +1,12 @@
 // Автопоиск схемы интервалов по кругам (--workout auto).
 //
 // Идея:
-//   1. Круг 1 — разминка, смотрим круги со 2-го.
-//   2. Делим круги на «быстрые» и «медленные» по средней скорости:
+//   1. Первые warmupLaps кругов (по умолчанию 1) — разминка, смотрим круги
+//      после неё.
+//   2. Делим эти круги на «быстрые» и «медленные» по средней скорости:
 //      ищем порог, при котором обе группы внутри максимально однородны.
-//   3. Со 2-го круга должно идти строгое чередование: быстрый, медленный,
-//      быстрый… Первое нарушение — конец схемы, дальше заминка.
+//   3. С первого круга после разминки должно идти строгое чередование:
+//      быстрый, медленный, быстрый… Первое нарушение — конец схемы, дальше заминка.
 //   4. Каждый быстрый круг округляем до «целой» дистанции с допуском.
 
 import type { Lap } from "./types";
@@ -24,13 +25,29 @@ export interface DetectedWorkout {
   warnings: string[];
 }
 
-export function detectWorkout(laps: Lap[], tolerancePct: number): DetectedWorkout {
-  const activeIndexes = findIntervalStructure(laps);
+export function detectWorkout(
+  laps: Lap[],
+  tolerancePct: number,
+  warmupLaps: number,
+): DetectedWorkout {
+  if (warmupLaps >= laps.length) {
+    return {
+      activeIndexes: [],
+      distancesM: null,
+      warnings: [
+        `Разминка ${warmupLaps} кругов, а в файле всего ${laps.length} — искать схему не в чем`,
+      ],
+    };
+  }
+
+  const activeIndexes = findIntervalStructure(laps, warmupLaps);
   if (activeIndexes.length === 0) {
     return {
       activeIndexes,
       distancesM: null,
-      warnings: ["Не найдено чередование быстрых отрезков и отдыха"],
+      warnings: [
+        `Не найдено чередование быстрых отрезков и отдыха начиная с круга ${warmupLaps + 1}`,
+      ],
     };
   }
 
@@ -52,16 +69,20 @@ export function detectWorkout(laps: Lap[], tolerancePct: number): DetectedWorkou
   return { activeIndexes, distancesM: distancesM as number[], warnings };
 }
 
-/** Позиции рабочих кругов при строгом чередовании «быстрый — медленный» со 2-го круга. */
-export function findIntervalStructure(laps: Lap[]): number[] {
+/**
+ * Позиции рабочих кругов при строгом чередовании «быстрый — медленный»,
+ * начиная с первого круга после разминки (позиция warmupLaps).
+ */
+export function findIntervalStructure(laps: Lap[], warmupLaps: number): number[] {
   const speeds = laps.map(lapSpeed);
-  const split = splitFastSlow(speeds.slice(1));
+  // Разминку в деление на быстрые и медленные не берём: её темп исказил бы порог.
+  const split = splitFastSlow(speeds.slice(warmupLaps));
   if (!split || split.fastMean < split.slowMean * MIN_FAST_TO_SLOW_RATIO) return [];
 
   const isFast = (i: number) => speeds[i] >= split.threshold;
   const activeIndexes: number[] = [];
 
-  for (let i = 1; i < laps.length; i += 2) {
+  for (let i = warmupLaps; i < laps.length; i += 2) {
     if (!isFast(i)) break; // на месте рабочего отрезка медленный круг — схема закончилась
     activeIndexes.push(i);
     if (i + 1 < laps.length && isFast(i + 1)) break; // вместо отдыха быстрый круг — тоже конец

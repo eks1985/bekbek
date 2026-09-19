@@ -1,6 +1,6 @@
 export { parseWorkout, type ParseOptions } from "./parse-workout";
 export { FitParseError } from "./1-decode";
-export type { WorkoutOption } from "./7-workout";
+export { DEFAULT_WARMUP_LAPS, type AutoOptions, type WorkoutOption } from "./7-workout";
 export {
   DEFAULT_TOLERANCE_PCT,
   WorkoutPatternError,
