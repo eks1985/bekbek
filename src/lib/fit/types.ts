@@ -67,7 +67,7 @@ export interface WorkoutSummary extends SegmentStats {
   subSport: string | null;
   /** Название спортивного профиля на часах, например «Run». */
   profileName: string | null;
-  /** Тег интервальной тренировки, например "200 400 600 1000 600x3" (при --workout). */
+  /** Тег интервальной тренировки, например "-200-400-600-1000-600x3-" (при --workout). */
   workoutTag: string | null;
   /** Время старта в часовом поясе часов, например 2026-09-09T20:18:31+03:00. */
   startTimeLocal: string | null;
@@ -107,9 +107,9 @@ export interface Lap extends SegmentStats {
 
 /** Результат применения схемы --workout. */
 export interface WorkoutInfo {
-  /** auto — найдена сама; manual — схема рабочих отрезков; manual-full — дистанция каждого круга. */
-  source: "auto" | "manual" | "manual-full";
-  /** Например "200 400 600 1000 600x3"; null — схему найти не удалось. */
+  /** auto — найдена сама; manual — схему задал пользователь. */
+  source: "auto" | "manual";
+  /** Например "-200-400-600-1000-600x3-"; null — схему найти не удалось. */
   tag: string | null;
   /** Допуск округления до целой дистанции, % (только для auto). */
   tolerancePct: number | null;

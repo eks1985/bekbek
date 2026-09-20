@@ -8,8 +8,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Меньший образ для Layero/контейнера. Безвредно для `next start`.
   output: "standalone",
-  // Prisma не должен инлайниться бандлером на сервере.
-  serverExternalPackages: ["@prisma/client"],
+  // Prisma и FIT SDK не должны инлайниться бандлером на сервере
+  // (оба — большие CJS-пакеты, работают только на Node).
+  serverExternalPackages: ["@prisma/client", "@garmin/fitsdk"],
 };
 
 export default nextConfig;

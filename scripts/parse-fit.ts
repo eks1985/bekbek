@@ -7,7 +7,10 @@
 //   npm run fit:parse -- file.fit --workout auto           (найти схему интервалов)
 //   npm run fit:parse -- file.fit --workout auto --tolerance 3
 //   npm run fit:parse -- file.fit --workout auto --warmup 3   (разминка — первые 3 круга)
-//   npm run fit:parse -- file.fit --workout "200 400 600x3"
+//   npm run fit:parse -- file.fit --workout "-200-400-600-400-200-"  (своя схема)
+//
+// Схема — значение на каждый круг файла: число — рабочий отрезок в метрах,
+// дефис — нерабочий круг (разминка, отдых, заминка). "200x3" ≡ "200-200-200".
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {

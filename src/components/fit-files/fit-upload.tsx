@@ -35,7 +35,16 @@ export function FitUpload() {
         return;
       }
 
-      toast.success(`Файл «${data.originalName}» загружен`);
+      if (!data.workout) {
+        // Файл сохранён, но разбор не получился — это не ошибка загрузки.
+        toast.warning("Файл загружен, но разобрать его не удалось", {
+          description: data.parseError,
+        });
+      } else if (data.workout.workoutTag) {
+        toast.success(`Загружено и разобрано: ${data.workout.workoutTag}`);
+      } else {
+        toast.success("Файл загружен и разобран, схема интервалов не найдена");
+      }
       setFile(null);
       if (inputRef.current) inputRef.current.value = "";
       router.refresh(); // перечитать список файлов на сервере

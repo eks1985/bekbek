@@ -3,6 +3,7 @@ export { FitParseError } from "./1-decode";
 export { DEFAULT_WARMUP_LAPS, type AutoOptions, type WorkoutOption } from "./7-workout";
 export {
   DEFAULT_TOLERANCE_PCT,
+  PATTERN_EXAMPLE,
   WorkoutPatternError,
   formatWorkoutTag,
   parseWorkoutPattern,

@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 import type { ParsedWorkout } from "@/lib/fit";
 
 /** Увеличивать, когда меняется формат data: по нему видно, какие записи переразобрать. */
-export const PARSER_VERSION = 1;
+export const PARSER_VERSION = 2;
 
 export function workoutRow(parsed: ParsedWorkout) {
   const { summary: s } = parsed;

@@ -2,6 +2,8 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { parseWorkout } from "@/lib/fit";
+import { workoutRow } from "@/lib/workouts/to-row";
 import { deleteObject, putObject } from "@/lib/storage/s3";
 
 export const MAX_FIT_SIZE_BYTES = 10 * 1024 * 1024;
@@ -11,6 +13,10 @@ export type UploadedFitFile = {
   originalName: string;
   sizeBytes: number;
   uploadedAt: Date;
+  /** Итог разбора; null — разобрать не удалось, см. parseError. */
+  workout: { startTime: Date; distanceM: number | null; workoutTag: string | null } | null;
+  /** Почему разбор не получился (файл при этом сохранён). */
+  parseError?: string;
 };
 
 export type UploadResult =
@@ -67,6 +73,18 @@ export async function uploadFitFile(
 
   await putObject(storageKey, bytes, "application/vnd.ant.fit");
 
+  // Разбираем сразу, как в консоли: --workout auto (допуск и разминка — по
+  // умолчанию). Если файл не поддался, он всё равно остаётся в бакете:
+  // парсер меняется, разбор можно будет повторить.
+  let workout: ReturnType<typeof workoutRow> | null = null;
+  let parseError: string | undefined;
+  try {
+    workout = workoutRow(parseWorkout(bytes, { fileName: originalName, workout: "auto" }));
+  } catch (err) {
+    parseError = err instanceof Error ? err.message : String(err);
+    console.error(`Не удалось разобрать ${originalName}:`, err);
+  }
+
   try {
     const row = await db.fitFile.create({
       data: {
@@ -76,10 +94,17 @@ export async function uploadFitFile(
         originalName,
         sizeBytes: bytes.length,
         sha256,
+        ...(workout ? { workout: { create: { userId, ...workout } } } : {}),
       },
-      select: { id: true, originalName: true, sizeBytes: true, uploadedAt: true },
+      select: {
+        id: true,
+        originalName: true,
+        sizeBytes: true,
+        uploadedAt: true,
+        workout: { select: { startTime: true, distanceM: true, workoutTag: true } },
+      },
     });
-    return { ok: true, file: row };
+    return { ok: true, file: { ...row, parseError } };
   } catch (err) {
     // Запись в БД не прошла — убираем объект, чтобы не оставлять сирот.
     await deleteObject(storageKey).catch(() => {});

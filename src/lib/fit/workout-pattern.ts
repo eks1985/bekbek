@@ -9,26 +9,35 @@ export const DEFAULT_TOLERANCE_PCT = 5;
 /** Элемент схемы: дистанция в метрах или null — «взять дистанцию круга из файла». */
 export type WorkoutPatternItem = number | null;
 
+/** Пример формата — он же подсказка во всех сообщениях об ошибках. */
+export const PATTERN_EXAMPLE = "-200-400-600-400-200-";
+
 /**
- * "200 400 600x3" → [200, 400, 600, 600, 600].
+ * Схема — это все круги файла подряд: число — рабочий отрезок в метрах,
+ * дефис — нерабочий круг (разминка, отдых, заминка). Значений должно быть
+ * столько же, сколько кругов (проверяет шаг 7).
+ *
  * "-200-400-"     → [null, 200, null, 400, null].
- * Разделители — пробелы или запятые; повтор — x (латинская или русская) или ×.
- * Дефис — «дистанция из файла» и заодно разделитель: "-200-" = "- 200 -".
- * Дефисы допустимы только в полной разметке (это проверяет шаг 7).
+ * "-200x3-"       → [null, 200, null, 200, null, 200, null]: xN — отрезки
+ *                   с отдыхом между ними, "200x3" ≡ "200-200-200".
+ * Пробелы и запятые не принимаем: формат один.
  */
 export function parseWorkoutPattern(text: string): WorkoutPatternItem[] {
-  const tokens = text
-    .split(/[\s,]+/)
-    .flatMap((chunk) => chunk.split(/(-)/))
-    .filter(Boolean);
-  if (tokens.length === 0) {
-    throw new WorkoutPatternError('Схема пустая. Пример: --workout "200 400 600x3"');
+  if (/[\s,]/.test(text)) {
+    throw new WorkoutPatternError(
+      `Схема записывается через дефис, без пробелов и запятых. Пример: "${PATTERN_EXAMPLE}"`,
+    );
   }
 
-  const distances: WorkoutPatternItem[] = [];
+  const tokens = text.split(/(-)/).filter(Boolean);
+  if (tokens.length === 0) {
+    throw new WorkoutPatternError(`Схема пустая. Пример: "${PATTERN_EXAMPLE}"`);
+  }
+
+  const items: WorkoutPatternItem[] = [];
   for (const token of tokens) {
     if (token === "-") {
-      distances.push(null);
+      items.push(null);
       continue;
     }
     const match = /^(\d+(?:\.\d+)?)(?:[xх×](\d+))?$/i.exec(token);
@@ -36,25 +45,51 @@ export function parseWorkoutPattern(text: string): WorkoutPatternItem[] {
     const repeat = match?.[2] ? Number(match[2]) : 1;
     if (!match || distance <= 0 || repeat < 1) {
       throw new WorkoutPatternError(
-        `Не понимаю «${token}» в схеме: нужны метры, например "200 400 600x3"`,
+        `Не понимаю «${token}» в схеме: нужны метры, например "${PATTERN_EXAMPLE}"`,
       );
     }
-    for (let i = 0; i < repeat; i++) distances.push(distance);
+    for (let i = 0; i < repeat; i++) {
+      // Внутри xN между отрезками подразумевается отдых.
+      if (i > 0) items.push(null);
+      items.push(distance);
+    }
   }
-  return distances;
+  return items;
 }
 
-/** [200, 400, 600, 600, 600] → "200 400 600x3". Подряд идущие повторы сворачиваются. */
-export function formatWorkoutTag(distances: number[]): string {
-  const groups: { distance: number; count: number }[] = [];
-  for (const distance of distances) {
-    const last = groups.at(-1);
-    if (last?.distance === distance) last.count++;
-    else groups.push({ distance, count: 1 });
+/**
+ * Круги → тег в том же формате, что и схема: [null,200,null,400,null] →
+ * "-200-400-". Одинаковые отрезки через один отдых сворачиваются: "-600x3-".
+ * Тег можно вставить обратно в поле схемы и получить тот же разбор.
+ */
+export function formatWorkoutTag(items: WorkoutPatternItem[]): string {
+  const parts: string[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item === null) {
+      parts.push("-");
+      continue;
+    }
+    if (i > 0 && items[i - 1] !== null) {
+      // Два отрезка подряд записать нечем: дефис — единственный разделитель.
+      // Так не бывает (auto ищет строгое чередование, в схеме числа разделены
+      // дефисом), но молча склеивать «200400» нельзя.
+      throw new WorkoutPatternError(
+        "Два рабочих круга подряд нельзя записать схемой: между ними нужен отдых",
+      );
+    }
+
+    // Сколько раз эта дистанция повторяется дальше через ровно один отдых.
+    let repeat = 1;
+    while (items[i + 1] === null && items[i + 2] === item) {
+      repeat++;
+      i += 2;
+    }
+    parts.push(repeat > 1 ? `${item}x${repeat}` : `${item}`);
   }
-  return groups
-    .map(({ distance, count }) => (count > 1 ? `${distance}x${count}` : `${distance}`))
-    .join(" ");
+
+  return parts.join("");
 }
 
 /**

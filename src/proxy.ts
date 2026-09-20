@@ -21,5 +21,6 @@ export function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  // /api/* сюда не попадает: route handler'ы проверяют сессию сами.
+  matcher: ["/dashboard/:path*", "/fit-files/:path*"],
 };
