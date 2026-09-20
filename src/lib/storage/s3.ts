@@ -1,6 +1,7 @@
 import "server-only";
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -64,6 +65,14 @@ export async function putObject(
       ContentType: contentType,
     }),
   );
+}
+
+/** Читает объект целиком в память: FIT-файлы маленькие (сотни КБ). */
+export async function getObject(key: string): Promise<Uint8Array> {
+  const { client, bucket } = getS3();
+  const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  if (!res.Body) throw new Error(`Пустой ответ хранилища для ${key}`);
+  return res.Body.transformToByteArray();
 }
 
 export async function deleteObject(key: string): Promise<void> {

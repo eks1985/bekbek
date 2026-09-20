@@ -48,8 +48,8 @@ export default async function FitFilePage(props: PageProps<"/fit-files/[id]">) {
           <CardHeader>
             <CardTitle>Файл не разобран</CardTitle>
             <CardDescription>
-              Сам файл сохранён в хранилище — разбор можно будет повторить, когда
-              поправим парсер.
+              Сам файл лежит в хранилище — нажмите «Разобрать заново», чтобы
+              разобрать его сейчас.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -59,7 +59,9 @@ export default async function FitFilePage(props: PageProps<"/fit-files/[id]">) {
             <CardHeader>
               <CardTitle>Сводка</CardTitle>
               <CardDescription>
-                Разбор при загрузке: схема auto, допуск {scheme?.tolerancePct ?? DEFAULT_TOLERANCE_PCT} %
+                {scheme?.source === "manual"
+                  ? "Разбор по своей схеме"
+                  : `Разбор режимом auto, допуск ${scheme?.tolerancePct ?? DEFAULT_TOLERANCE_PCT} %`}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -96,27 +98,29 @@ export default async function FitFilePage(props: PageProps<"/fit-files/[id]">) {
               ))}
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Разобрать заново</CardTitle>
-              <CardDescription>
-                Если тег определился неверно — поменяйте параметры или задайте схему вручную.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ReparseForm
-                defaults={{
-                  tolerancePct: scheme?.tolerancePct ?? DEFAULT_TOLERANCE_PCT,
-                  warmupLaps: scheme?.warmupLaps ?? DEFAULT_WARMUP_LAPS,
-                  pattern: scheme?.tag ?? "",
-                  lapCount: parsed.summary.lapCount,
-                }}
-              />
-            </CardContent>
-          </Card>
         </>
       )}
+
+      {/* Форма нужна и для неразобранного файла — ей его и разбираем. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Разобрать заново</CardTitle>
+          <CardDescription>
+            Если тег определился неверно — поменяйте параметры или задайте схему вручную.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ReparseForm
+            fitFileId={file.id}
+            defaults={{
+              tolerancePct: scheme?.tolerancePct ?? DEFAULT_TOLERANCE_PCT,
+              warmupLaps: scheme?.warmupLaps ?? DEFAULT_WARMUP_LAPS,
+              pattern: scheme?.tag ?? "",
+              lapCount: parsed?.summary.lapCount ?? null,
+            }}
+          />
+        </CardContent>
+      </Card>
     </main>
   );
 }

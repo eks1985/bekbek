@@ -50,3 +50,12 @@ export async function allowRequestCode(
 
   return true;
 }
+
+/**
+ * Лимит на повторный разбор: 30 запросов от пользователя за окно. Каждый
+ * разбор — чтение файла из бакета и заметная работа процессора, поэтому
+ * дёргать его в цикле не даём. Возвращает true, если запрос разрешён.
+ */
+export async function allowReparse(userId: string): Promise<boolean> {
+  return hit({ bucket: "reparse:user", key: userId, max: 30 });
+}

@@ -1,9 +1,11 @@
 "use client";
 
-// Заготовка повторного разбора: поля и проверка ввода работают, кнопка пока
-// неактивна — серверную часть (достать файл из бакета, разобрать заново,
-// перезаписать workouts) делаем следующим шагом.
+// Повторный разбор: своя схема либо параметры режима auto. Схема проверяется
+// прямо здесь (модуль workout-pattern чистый), разбор делает сервер —
+// достаёт файл из бакета и перезаписывает запись в workouts.
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { CircleHelp } from "lucide-react";
 import {
   PATTERN_EXAMPLE,
@@ -20,15 +22,20 @@ export type ReparseDefaults = {
   warmupLaps: number;
   /** Схема из текущего разбора — как подсказка в поле схемы. */
   pattern: string;
-  /** Сколько кругов в файле: столько же значений должно быть в схеме. */
-  lapCount: number;
+  /** Кругов в файле: столько же значений нужно в схеме. null — файл не разобран. */
+  lapCount: number | null;
 };
 
 /** Разбирает введённую схему: сколько значений вышло или что не так. */
-function checkPattern(text: string, lapCount: number): { text: string; ok: boolean } | null {
+function checkPattern(
+  text: string,
+  lapCount: number | null,
+): { text: string; ok: boolean } | null {
   if (text.trim() === "") return null;
   try {
     const items = parseWorkoutPattern(text);
+    // Пока файл не разобран, число кругов неизвестно — сверит сервер.
+    if (lapCount === null) return { ok: true, text: `Значений: ${items.length}` };
     const ok = items.length === lapCount;
     return {
       ok,
@@ -41,13 +48,54 @@ function checkPattern(text: string, lapCount: number): { text: string; ok: boole
   }
 }
 
-export function ReparseForm({ defaults }: { defaults: ReparseDefaults }) {
+export function ReparseForm({
+  fitFileId,
+  defaults,
+}: {
+  fitFileId: string;
+  defaults: ReparseDefaults;
+}) {
+  const router = useRouter();
   const [tolerance, setTolerance] = useState(String(defaults.tolerancePct));
   const [warmup, setWarmup] = useState(String(defaults.warmupLaps));
   const [pattern, setPattern] = useState("");
   const [hintOpen, setHintOpen] = useState(false);
+  const [pending, setPending] = useState(false);
 
   const check = checkPattern(pattern, defaults.lapCount);
+  const manual = pattern.trim() !== "";
+
+  async function reparse() {
+    setPending(true);
+    try {
+      // При своей схеме допуск и разминка не применяются — их не отправляем.
+      const body = manual
+        ? { pattern: pattern.trim() }
+        : { tolerancePct: Number(tolerance), warmupLaps: Number(warmup) };
+      const res = await fetch(`/api/fit-files/${fitFileId}/reparse`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        toast.error(data.error ?? "Не удалось разобрать файл");
+        return;
+      }
+
+      toast.success(
+        data.workoutTag
+          ? `Разобрано: ${data.workoutTag}`
+          : "Файл разобран, схема интервалов не найдена",
+      );
+      router.refresh(); // перечитать страницу с новым результатом
+    } catch {
+      toast.error("Сеть недоступна. Попробуйте ещё раз.");
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -89,6 +137,7 @@ export function ReparseForm({ defaults }: { defaults: ReparseDefaults }) {
             min={1}
             max={49}
             value={tolerance}
+            disabled={manual || pending}
             onChange={(e) => setTolerance(e.target.value)}
           />
         </div>
@@ -99,26 +148,34 @@ export function ReparseForm({ defaults }: { defaults: ReparseDefaults }) {
             type="number"
             min={0}
             value={warmup}
+            disabled={manual || pending}
             onChange={(e) => setWarmup(e.target.value)}
           />
         </div>
       </div>
 
       <div className="flex items-center gap-3">
-        <Button disabled>Разобрать заново</Button>
-        <p className="text-sm text-muted-foreground">Пока не работает — следующий шаг.</p>
+        <Button onClick={reparse} disabled={pending || check?.ok === false}>
+          {pending ? "Разбираем…" : "Разобрать заново"}
+        </Button>
+        {manual && (
+          <p className="text-sm text-muted-foreground">
+            При своей схеме допуск и разминка не применяются.
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
 /** Подсказка по формату схемы — тот же синтаксис, что у флага --workout. */
-function PatternHint({ lapCount }: { lapCount: number }) {
+function PatternHint({ lapCount }: { lapCount: number | null }) {
   return (
     <div className="rounded-lg border bg-muted/40 p-3 text-sm">
       <p>
-        Схема — значение на каждый круг файла (их {lapCount}): метры рабочего отрезка либо
-        дефис, если круг нерабочий — разминка, трусца между отрезками, заминка.
+        Схема — значение на каждый круг файла{lapCount === null ? "" : ` (их ${lapCount})`}:
+        метры рабочего отрезка либо дефис, если круг нерабочий — разминка, трусца между
+        отрезками, заминка.
       </p>
       <p className="mt-1 font-mono">{PATTERN_EXAMPLE}</p>
       <p className="mt-2 text-muted-foreground">
