@@ -41,19 +41,9 @@ export async function FitFileList({ userId }: { userId: string }) {
           <p className="text-sm text-muted-foreground">Файлов пока нет.</p>
         ) : (
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                <th className="py-2 font-medium">Файл</th>
-                <th className="py-2 font-medium">Дата</th>
-                <th className="py-2 text-center font-medium">Расстояние</th>
-                <th className="w-8" />
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((file) => (
-                <FitFileRow key={file.id} file={file} />
-              ))}
-            </tbody>
+            {files.map((file) => (
+              <FitFileRow key={file.id} file={file} />
+            ))}
           </table>
         )}
       </CardContent>
@@ -63,36 +53,54 @@ export async function FitFileList({ userId }: { userId: string }) {
 
 function FitFileRow({ file }: { file: FitFileListItem }) {
   const { workout } = file;
+  const tag = workout?.workoutTag;
 
+  // Запись — три «этажа» в одном <tbody>: дата/расстояние/иконка, имя файла, тег.
+  // Так в строке остаются три колонки и на узком экране всё помещается.
   return (
-    <tr
+    <tbody
       className="border-b last:border-0"
       // Размер и дату загрузки держим в подсказке, чтобы не плодить колонки.
       title={`${formatSize(file.sizeBytes)}, загружен ${dateFormat.format(file.uploadedAt)}`}
     >
-      <td className="max-w-[16rem] truncate py-2 font-medium">{file.originalName}</td>
-      <td className="py-2 whitespace-nowrap tabular-nums">
-        {workout ? (
-          dateFormat.format(workout.startTime)
-        ) : (
-          <span className="text-muted-foreground">не разобран</span>
-        )}
-      </td>
-      <td className="py-2 text-center whitespace-nowrap tabular-nums">
-        {formatDistance(workout?.distanceM ?? null)}
-      </td>
-      <td className="py-2 text-right">
-        {/* Base UI: подмена элемента — через render, не asChild.
-            nativeButton={false} — внутри <a>, а не <button>. */}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          nativeButton={false}
-          render={<Link href={`/fit-files/${file.id}`} aria-label="Результат разбора" />}
+      <tr>
+        <td className="pt-2 whitespace-nowrap tabular-nums">
+          {workout ? (
+            dateFormat.format(workout.startTime)
+          ) : (
+            <span className="text-muted-foreground">не разобран</span>
+          )}
+        </td>
+        <td className="pt-2 text-center whitespace-nowrap tabular-nums">
+          {formatDistance(workout?.distanceM ?? null)}
+        </td>
+        <td className="pt-2 text-right">
+          {/* Base UI: подмена элемента — через render, не asChild.
+              nativeButton={false} — внутри <a>, а не <button>. */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            nativeButton={false}
+            render={<Link href={`/fit-files/${file.id}`} aria-label="Результат разбора" />}
+          >
+            <CirclePlay />
+          </Button>
+        </td>
+      </tr>
+      <tr>
+        {/* max-w-0 + w-full: ячейка не растягивает таблицу, длинное имя обрезается. */}
+        <td
+          colSpan={3}
+          className={`w-full  max-w-0 truncate text-xs text-muted-foreground ${tag ? "" : "pb-2"}`}
         >
-          <CirclePlay />
-        </Button>
-      </td>
-    </tr>
+          {file.originalName}
+        </td>
+      </tr>
+      <tr>
+        <td colSpan={3} className="pt-1 pb-2 text-center font-mono text-sm font-semibold">
+          {tag || "Схема интервалов не найдена"}
+        </td>
+      </tr>
+    </tbody>
   );
 }
