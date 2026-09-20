@@ -117,6 +117,8 @@ export default async function FitFilePage(props: PageProps<"/fit-files/[id]">) {
               warmupLaps: scheme?.warmupLaps ?? DEFAULT_WARMUP_LAPS,
               pattern: scheme?.tag ?? "",
               lapCount: parsed?.summary.lapCount ?? null,
+              // Файл не разобран или разобран auto — открываем вкладку auto.
+              source: scheme?.source === "manual" ? "manual" : "auto",
             }}
           />
         </CardContent>

@@ -6,7 +6,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CircleHelp } from "lucide-react";
 import {
   PATTERN_EXAMPLE,
   PATTERN_EXAMPLE_PLUS,
@@ -16,14 +15,19 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+
+type Mode = "auto" | "manual";
 
 export type ReparseDefaults = {
   tolerancePct: number;
   warmupLaps: number;
-  /** Схема из текущего разбора — как подсказка в поле схемы. */
+  /** Схема текущего разбора: подставляется в поле на вкладке «Своя схема». */
   pattern: string;
   /** Кругов в файле: столько же значений нужно в схеме. null — файл не разобран. */
   lapCount: number | null;
+  /** Каким режимом файл разобран сейчас — на его вкладке и открываем форму. */
+  source: Mode | null;
 };
 
 /** Разбирает введённую схему: сколько значений вышло или что не так. */
@@ -56,14 +60,14 @@ export function ReparseForm({
   defaults: ReparseDefaults;
 }) {
   const router = useRouter();
+  const [mode, setMode] = useState<Mode>(defaults.source ?? "auto");
   const [tolerance, setTolerance] = useState(String(defaults.tolerancePct));
   const [warmup, setWarmup] = useState(String(defaults.warmupLaps));
-  const [pattern, setPattern] = useState("");
-  const [hintOpen, setHintOpen] = useState(false);
+  const [pattern, setPattern] = useState(defaults.pattern);
   const [pending, setPending] = useState(false);
 
-  const check = checkPattern(pattern, defaults.lapCount);
-  const manual = pattern.trim() !== "";
+  const manual = mode === "manual";
+  const check = manual ? checkPattern(pattern, defaults.lapCount) : null;
 
   async function reparse() {
     setPending(true);
@@ -99,94 +103,127 @@ export function ReparseForm({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="pattern">Своя схема</Label>
-        <div className="flex items-center gap-2">
+      {/* Base UI: значение группы — массив, по умолчанию выбран один элемент.
+          Повторный клик по активной вкладке даёт пустой массив — режим не меняем. */}
+      <ToggleGroup
+        variant="outline"
+        spacing={0}
+        value={[mode]}
+        onValueChange={(value) => {
+          const next = value[0] as Mode | undefined;
+          if (next) setMode(next);
+        }}
+        aria-label="Режим разбора"
+      >
+        <ToggleGroupItem value="auto" disabled={pending}>
+          Автоматически
+        </ToggleGroupItem>
+        <ToggleGroupItem value="manual" disabled={pending}>
+          Своя схема
+        </ToggleGroupItem>
+      </ToggleGroup>
+
+      {manual ? (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="pattern">Схема</Label>
           <Input
             id="pattern"
-            className="flex-1"
-            placeholder={defaults.pattern || PATTERN_EXAMPLE}
+            placeholder={PATTERN_EXAMPLE}
             value={pattern}
+            disabled={pending}
             onChange={(e) => setPattern(e.target.value)}
             aria-invalid={check?.ok === false}
           />
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Как записывается схема"
-            aria-expanded={hintOpen}
-            onClick={() => setHintOpen((open) => !open)}
-          >
-            <CircleHelp />
-          </Button>
+          {check && (
+            <p className={check.ok ? "text-sm text-muted-foreground" : "text-sm text-destructive"}>
+              {check.text}
+            </p>
+          )}
         </div>
-        {check && (
-          <p className={check.ok ? "text-sm text-muted-foreground" : "text-sm text-destructive"}>
-            {check.text}
-          </p>
-        )}
-        {hintOpen && <PatternHint lapCount={defaults.lapCount} />}
-      </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="tolerance">Допуск, %</Label>
+            <Input
+              id="tolerance"
+              type="number"
+              min={1}
+              max={49}
+              value={tolerance}
+              disabled={pending}
+              onChange={(e) => setTolerance(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="warmup">Кругов разминки</Label>
+            <Input
+              id="warmup"
+              type="number"
+              min={0}
+              value={warmup}
+              disabled={pending}
+              onChange={(e) => setWarmup(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="tolerance">Допуск, %</Label>
-          <Input
-            id="tolerance"
-            type="number"
-            min={1}
-            max={49}
-            value={tolerance}
-            disabled={manual || pending}
-            onChange={(e) => setTolerance(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="warmup">Кругов разминки</Label>
-          <Input
-            id="warmup"
-            type="number"
-            min={0}
-            value={warmup}
-            disabled={manual || pending}
-            onChange={(e) => setWarmup(e.target.value)}
-          />
-        </div>
-      </div>
+      <Note>
+        {manual ? <PatternHint lapCount={defaults.lapCount} /> : <AutoHint />}
+      </Note>
 
-      <div className="flex items-center gap-3">
+      <div>
         <Button onClick={reparse} disabled={pending || check?.ok === false}>
           {pending ? "Разбираем…" : "Разобрать заново"}
         </Button>
-        {manual && (
-          <p className="text-sm text-muted-foreground">
-            При своей схеме допуск и разминка не применяются.
-          </p>
-        )}
       </div>
     </div>
+  );
+}
+
+/** Общая рамка для пояснений — чтобы оба режима выглядели одинаково. */
+function Note({ children }: { children: React.ReactNode }) {
+  return <div className="rounded-lg border bg-muted/40 p-3 text-sm">{children}</div>;
+}
+
+/** Что делает режим auto и на что влияют его параметры. */
+function AutoHint() {
+  return (
+    <>
+      <p>
+        Рабочие круги определятся автоматически: после кругов разминки парсер ищет
+        чередование быстрых отрезков и отдыха (подходит только для тренировок с чётким
+        чередованием быстрый отрезок / отдых).
+      </p>
+      <p className="mt-2 text-muted-foreground">
+        <span className="font-medium text-foreground">Допуск</span> — насколько дистанция
+        круга по GPS может отличаться от «целой» (600 м вместо 588 м), чтобы отрезок
+        зачёлся. <span className="font-medium text-foreground">Кругов разминки</span> —
+        сколько первых кругов пропустить: схема ищется со следующего за ними.
+      </p>
+    </>
   );
 }
 
 /** Подсказка по формату схемы — тот же синтаксис, что у флага --workout. */
 function PatternHint({ lapCount }: { lapCount: number | null }) {
   return (
-    <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+    <>
       <p>
         Схема — значение на каждый круг файла{lapCount === null ? "" : ` (их ${lapCount})`}:
-        метры рабочего отрезка либо дефис, если круг нерабочий — разминка, трусца между
-        отрезками, заминка.
+        длина в метрах рабочего отрезка либо дефис, если это разминка, отдых или заминка.
       </p>
       <p className="mt-1 font-mono">{PATTERN_EXAMPLE}</p>
       <p className="mt-2 text-muted-foreground">
-        <span className="font-mono">200x3</span> — то же, что{" "}
+        <span className="font-mono">Можно компактно, например 200x3</span> — то же самое, что и{" "}
         <span className="font-mono">200-200-200</span>: три отрезка с отдыхом между ними.
-        Плюс соединяет рабочие круги, идущие подряд, без отдыха:
+        Используйте + если несколько рабочих отрезков идут подряд без отдыха:
+        <span className="font-mono">{PATTERN_EXAMPLE_PLUS}</span>
       </p>
-      <p className="mt-1 font-mono">{PATTERN_EXAMPLE_PLUS}</p>
+      {/* <p className="mt-1 font-mono">{PATTERN_EXAMPLE_PLUS}</p> */}
       <p className="mt-2 text-muted-foreground">
-        Пробелы и запятые не нужны. Готовый тег сверху можно скопировать сюда и поправить.
+        Пробелы и запятые не нужны. В поле уже стоит текущий тег тренировки — его можно отредактировать и нажать Разобрать заново
       </p>
-    </div>
+    </>
   );
 }
