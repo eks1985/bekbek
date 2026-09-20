@@ -1,5 +1,7 @@
 import { requireUser } from "@/lib/auth/session";
 import { LogoutButton } from "@/components/logout-button";
+import { FitUpload } from "@/components/fit-files/fit-upload";
+import { FitFileList } from "@/components/fit-files/fit-file-list";
 import {
   Card,
   CardContent,
@@ -16,8 +18,8 @@ export default async function DashboardPage() {
   const user = await requireUser();
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-md">
+    <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
+      <Card className="w-full">
         <CardHeader>
           <CardTitle>Вы вошли</CardTitle>
           <CardDescription>Защищённая страница.</CardDescription>
@@ -29,6 +31,9 @@ export default async function DashboardPage() {
           <LogoutButton />
         </CardContent>
       </Card>
+
+      <FitUpload />
+      <FitFileList userId={user.id} />
     </main>
   );
 }

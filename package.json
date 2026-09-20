@@ -17,6 +17,7 @@
     "fit:parse": "tsx scripts/parse-fit.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1136.0",
     "@base-ui/react": "^1.8.0",
     "@garmin/fitsdk": "^21.214.0",
     "@prisma/adapter-pg": "^7.10.0",
