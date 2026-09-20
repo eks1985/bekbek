@@ -109,7 +109,10 @@ export interface Lap extends SegmentStats {
 export interface WorkoutInfo {
   /** auto — найдена сама; manual — схему задал пользователь. */
   source: "auto" | "manual";
-  /** Например "-200-400-600-1000-600x3-"; null — схему найти не удалось. */
+  /**
+   * Например "-200-400-600-1000-600x3-"; в ручной схеме рабочие круги подряд
+   * пишутся через плюс ("-200+400-"). null — схему найти не удалось.
+   */
   tag: string | null;
   /** Допуск округления до целой дистанции, % (только для auto). */
   tolerancePct: number | null;

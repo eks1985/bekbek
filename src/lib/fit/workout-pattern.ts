@@ -12,6 +12,9 @@ export type WorkoutPatternItem = number | null;
 /** Пример формата — он же подсказка во всех сообщениях об ошибках. */
 export const PATTERN_EXAMPLE = "-200-400-600-400-200-";
 
+/** Пример с рабочими кругами подряд, без отдыха между ними. */
+export const PATTERN_EXAMPLE_PLUS = "-200+400-200+400-";
+
 /**
  * Схема — это все круги файла подряд: число — рабочий отрезок в метрах,
  * дефис — нерабочий круг (разминка, отдых, заминка). Значений должно быть
@@ -20,6 +23,8 @@ export const PATTERN_EXAMPLE = "-200-400-600-400-200-";
  * "-200-400-"     → [null, 200, null, 400, null].
  * "-200x3-"       → [null, 200, null, 200, null, 200, null]: xN — отрезки
  *                   с отдыхом между ними, "200x3" ≡ "200-200-200".
+ * "-200+400-"     → [null, 200, 400, null]: плюс соединяет рабочие круги,
+ *                   идущие подряд (200 быстро и сразу 400 ещё быстрее).
  * Пробелы и запятые не принимаем: формат один.
  */
 export function parseWorkoutPattern(text: string): WorkoutPatternItem[] {
@@ -29,18 +34,29 @@ export function parseWorkoutPattern(text: string): WorkoutPatternItem[] {
     );
   }
 
-  const tokens = text.split(/(-)/).filter(Boolean);
+  const tokens = text.split(/([-+])/).filter(Boolean);
   if (tokens.length === 0) {
     throw new WorkoutPatternError(`Схема пустая. Пример: "${PATTERN_EXAMPLE}"`);
   }
 
   const items: WorkoutPatternItem[] = [];
-  for (const token of tokens) {
+  for (const [i, token] of tokens.entries()) {
     if (token === "-") {
       items.push(null);
       continue;
     }
-    const match = /^(\d+(?:\.\d+)?)(?:[xх×](\d+))?$/i.exec(token);
+    if (token === "+") {
+      // Плюс только склеивает два числа; своего круга у него нет.
+      const between = isDistance(tokens[i - 1]) && isDistance(tokens[i + 1]);
+      if (!between) {
+        throw new WorkoutPatternError(
+          `«+» ставится между двумя отрезками, например "${PATTERN_EXAMPLE_PLUS}"`,
+        );
+      }
+      continue;
+    }
+
+    const match = DISTANCE_RE.exec(token);
     const distance = Number(match?.[1]);
     const repeat = match?.[2] ? Number(match[2]) : 1;
     if (!match || distance <= 0 || repeat < 1) {
@@ -48,18 +64,26 @@ export function parseWorkoutPattern(text: string): WorkoutPatternItem[] {
         `Не понимаю «${token}» в схеме: нужны метры, например "${PATTERN_EXAMPLE}"`,
       );
     }
-    for (let i = 0; i < repeat; i++) {
+    for (let k = 0; k < repeat; k++) {
       // Внутри xN между отрезками подразумевается отдых.
-      if (i > 0) items.push(null);
+      if (k > 0) items.push(null);
       items.push(distance);
     }
   }
   return items;
 }
 
+/** Дистанция с необязательным повтором: "600" или "600x3". */
+const DISTANCE_RE = /^(\d+(?:\.\d+)?)(?:[xх×](\d+))?$/i;
+
+function isDistance(token: string | undefined): boolean {
+  return token !== undefined && DISTANCE_RE.test(token);
+}
+
 /**
  * Круги → тег в том же формате, что и схема: [null,200,null,400,null] →
- * "-200-400-". Одинаковые отрезки через один отдых сворачиваются: "-600x3-".
+ * "-200-400-". Рабочие круги подряд разделяются плюсом: "-200+400-".
+ * Одинаковые отрезки через один отдых сворачиваются: "-600x3-".
  * Тег можно вставить обратно в поле схемы и получить тот же разбор.
  */
 export function formatWorkoutTag(items: WorkoutPatternItem[]): string {
@@ -72,12 +96,8 @@ export function formatWorkoutTag(items: WorkoutPatternItem[]): string {
       continue;
     }
     if (i > 0 && items[i - 1] !== null) {
-      // Два отрезка подряд записать нечем: дефис — единственный разделитель.
-      // Так не бывает (auto ищет строгое чередование, в схеме числа разделены
-      // дефисом), но молча склеивать «200400» нельзя.
-      throw new WorkoutPatternError(
-        "Два рабочих круга подряд нельзя записать схемой: между ними нужен отдых",
-      );
+      // Предыдущий круг тоже рабочий: отдыха между ними нет.
+      parts.push("+");
     }
 
     // Сколько раз эта дистанция повторяется дальше через ровно один отдых.

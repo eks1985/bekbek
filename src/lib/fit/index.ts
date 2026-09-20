@@ -4,6 +4,7 @@ export { DEFAULT_WARMUP_LAPS, type AutoOptions, type WorkoutOption } from "./7-w
 export {
   DEFAULT_TOLERANCE_PCT,
   PATTERN_EXAMPLE,
+  PATTERN_EXAMPLE_PLUS,
   WorkoutPatternError,
   formatWorkoutTag,
   parseWorkoutPattern,

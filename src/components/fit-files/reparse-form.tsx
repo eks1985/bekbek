@@ -7,6 +7,7 @@ import { useState } from "react";
 import { CircleHelp } from "lucide-react";
 import {
   PATTERN_EXAMPLE,
+  PATTERN_EXAMPLE_PLUS,
   WorkoutPatternError,
   parseWorkoutPattern,
 } from "@/lib/fit/workout-pattern";
@@ -123,6 +124,10 @@ function PatternHint({ lapCount }: { lapCount: number }) {
       <p className="mt-2 text-muted-foreground">
         <span className="font-mono">200x3</span> — то же, что{" "}
         <span className="font-mono">200-200-200</span>: три отрезка с отдыхом между ними.
+        Плюс соединяет рабочие круги, идущие подряд, без отдыха:
+      </p>
+      <p className="mt-1 font-mono">{PATTERN_EXAMPLE_PLUS}</p>
+      <p className="mt-2 text-muted-foreground">
         Пробелы и запятые не нужны. Готовый тег сверху можно скопировать сюда и поправить.
       </p>
     </div>
