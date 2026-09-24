@@ -218,7 +218,9 @@ function PatternHint({ lapCount }: { lapCount: number | null }) {
         <span className="font-mono">Можно компактно, например 200x3</span> — то же самое, что и{" "}
         <span className="font-mono">200-200-200</span>: три отрезка с отдыхом между ними.
         Используйте + если несколько рабочих отрезков идут подряд без отдыха:
-        <span className="font-mono">{PATTERN_EXAMPLE_PLUS}</span>
+        <span className="font-mono">{PATTERN_EXAMPLE_PLUS}</span>. Два дефиса подряд — два
+        нерабочих круга подряд, например два круга отдыха:{" "}
+        <span className="font-mono">-200--400-</span>
       </p>
       {/* <p className="mt-1 font-mono">{PATTERN_EXAMPLE_PLUS}</p> */}
       <p className="mt-2 text-muted-foreground">
