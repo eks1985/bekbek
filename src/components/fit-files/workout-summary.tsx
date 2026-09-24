@@ -13,6 +13,13 @@ function formatStart(summary: StoredWorkout["summary"]): string {
   return raw ? dateFormat.format(new Date(raw)) : "—";
 }
 
+/** Время круга в минутах: 95 → "1:35", 3910 → "65:10" (часы не выделяем). */
+function formatLapTime(sec: number | null): string {
+  if (sec === null) return "—";
+  const total = Math.round(sec);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
 function Row({ label, value }: { label: string; value: string | number | null }) {
   return (
     <div className="flex items-baseline justify-between gap-4 border-b py-2 last:border-0">
@@ -60,13 +67,15 @@ function Laps({ laps }: { laps: StoredWorkout["laps"] }) {
   return (
     <div className="flex flex-col gap-2">
       <p className="text-sm font-medium">Круги по файлу</p>
-      {/* Колонки по половине ширины: номер круга и дистанция сходятся
-          к середине карточки, читать пару значений проще. */}
+      {/* Дистанция и номер круга — широкие крайние колонки, время и темп
+          посередине: значения сходятся к центру карточки, читать проще. */}
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-muted-foreground">
-            <th className="w-1/2 py-1 pr-3 text-right font-medium">Дистанция</th>
-            <th className="w-1/2 py-1 pl-3 text-left font-medium">Круг</th>
+            <th className="w-1/3 py-1 pr-3 text-right font-medium">Дистанция</th>
+            <th className="w-1/6 py-1 px-3 text-right font-medium">Время</th>
+            <th className="w-1/6 py-1 px-3 text-right font-medium">Темп</th>
+            <th className="w-1/3 py-1 pl-3 text-left font-medium">Круг</th>
           </tr>
         </thead>
         <tbody>
@@ -74,6 +83,9 @@ function Laps({ laps }: { laps: StoredWorkout["laps"] }) {
             // gpsDistanceM заполнен только у кругов, где схема подменила дистанцию.
             const fileDistance = lap.gpsDistanceM ?? lap.distanceM;
             const bySchema = lap.gpsDistanceM == null ? null : lap.distanceM;
+            // avgPace у скорректированных кругов уже посчитан по реальной
+            // дистанции (см. withRealDistance в 7-workout.ts), отдельный
+            // пересчёт здесь не нужен.
             return (
               <tr key={lap.index} className="border-b last:border-0">
                 <td className="py-1 pr-3 text-right tabular-nums">
@@ -81,6 +93,12 @@ function Laps({ laps }: { laps: StoredWorkout["laps"] }) {
                   {bySchema !== null && (
                     <span className="text-muted-foreground"> → {Math.round(bySchema)} м</span>
                   )}
+                </td>
+                <td className="py-1 px-3 text-right tabular-nums">
+                  {formatLapTime(lap.durationSec)}
+                </td>
+                <td className="py-1 px-3 text-right tabular-nums">
+                  {lap.avgPace === null ? "—" : `${lap.avgPace}/км`}
                 </td>
                 <td className="py-1 pl-3 text-left tabular-nums">{lap.index}</td>
               </tr>
