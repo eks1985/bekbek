@@ -165,12 +165,12 @@ function printSummary(
   console.log(`✓ ${file} → ${path.relative(process.cwd(), outFile)}`);
   console.log(
     `  ${s.startTimeLocal ?? s.startTime} · ${s.sport ?? "?"} · ${km} км · ${s.duration ?? "—"} · ` +
-      `темп ${s.avgPace ?? "—"}/км · пульс ${s.avgHeartRate ?? "—"} · ` +
+      `темп ${s.avgPace ?? "—"} ·пульс ${s.avgHeartRate ?? "—"} · ` +
       `набор ${s.totalAscentM ?? "—"} м · кругов ${laps.length} · ` +
       `сплитов ${kmSplits.items.length} (${kmSplits.source})`,
   );
   if (workout) {
-    const pace = workout.adjustedAvgPace ? ` · темп отрезков ${workout.adjustedAvgPace}/км` : "";
+    const pace = workout.adjustedAvgPace ? ` · темп отрезков ${workout.adjustedAvgPace}` : "";
     const noTag = workout.source === "auto" ? "не найдена" : "не задана";
     const warmup = workout.warmupLaps === null ? "" : `, разминка — кругов: ${workout.warmupLaps}`;
     console.log(`  схема: ${workout.tag ?? noTag} (${workout.source}${warmup})${pace}`);

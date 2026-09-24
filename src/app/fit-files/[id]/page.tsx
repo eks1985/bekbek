@@ -88,7 +88,7 @@ export default async function FitFilePage(props: PageProps<"/fit-files/[id]">) {
               {scheme?.adjustedAvgPace && (
                 <p className="text-sm text-muted-foreground">
                   Отрезки: {(scheme.adjustedDistanceM ?? 0) / 1000} км, темп{" "}
-                  {scheme.adjustedAvgPace}/км
+                  {scheme.adjustedAvgPace}
                 </p>
               )}
               {scheme?.warnings.map((warning) => (

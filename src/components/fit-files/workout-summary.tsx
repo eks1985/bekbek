@@ -45,7 +45,7 @@ export function WorkoutSummary({ workout }: { workout: StoredWorkout }) {
           value={s.distanceM === null ? null : `${(s.distanceM / 1000).toFixed(2)} км`}
         />
         <Row label="Время" value={s.duration} />
-        <Row label="Средний темп" value={s.avgPace === null ? null : `${s.avgPace}/км`} />
+        <Row label="Средний темп" value={s.avgPace} />
         <Row label="Пульс средний / макс" value={pulse} />
         <Row label="Набор высоты" value={s.totalAscentM === null ? null : `${s.totalAscentM} м`} />
         <Row label="Кругов" value={s.lapCount} />
