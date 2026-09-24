@@ -89,16 +89,16 @@ function Laps({ laps }: { laps: StoredWorkout["laps"] }) {
             return (
               <tr key={lap.index} className="border-b last:border-0">
                 <td className="py-1 pr-3 text-right tabular-nums">
-                  {fileDistance === null ? "—" : `${Math.round(fileDistance)} м`}
+                  {fileDistance === null ? "—" : Math.round(fileDistance)}
                   {bySchema !== null && (
-                    <span className="text-muted-foreground"> → {Math.round(bySchema)} м</span>
+                    <span className="text-muted-foreground"> → {Math.round(bySchema)}</span>
                   )}
                 </td>
                 <td className="py-1 px-3 text-right tabular-nums">
                   {formatLapTime(lap.durationSec)}
                 </td>
                 <td className="py-1 px-3 text-right tabular-nums">
-                  {lap.avgPace === null ? "—" : `${lap.avgPace}/км`}
+                  {lap.avgPace ?? "—"}
                 </td>
                 <td className="py-1 pl-3 text-left tabular-nums">{lap.index}</td>
               </tr>
