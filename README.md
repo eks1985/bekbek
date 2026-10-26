@@ -249,6 +249,27 @@ npm run fit:parse -- file.fit --workout "-200-400-600-1000-600-600-600-"
 (`"200 400 600 1000 600x3"`) — в `summary.workoutTag`, подробности и
 предупреждения — в `workout`. Итоги тренировки и км-сплиты остаются по GPS.
 
+## MCP-сервер (`/api/mcp`)
+
+Эндпоинт Streamable HTTP для Claude и других MCP-клиентов: `src/app/api/mcp/route.ts`,
+инструменты — `src/lib/mcp/server.ts`. Stateless, ответы JSON, сервер создаётся
+на каждый запрос.
+
+Инструменты: `whoami`, `list_workouts` (фильтры по дате, виду спорта, тегу,
+дистанции), `list_fit_files`, `get_workout` (итоги, круги, км-сплиты, схема),
+`reparse_workout` (своя схема или auto с допуском/разминкой; лимит тот же, что
+у кнопки в интерфейсе).
+
+**Авторизация временная, на время тестов:** сервисный ключ `MCP_SERVICE_KEY`
+открывает данные любого пользователя; какого — `?user=<email>`, заголовок
+`X-MCP-User` или `MCP_DEFAULT_USER_EMAIL`. Ключ — в `Authorization: Bearer …`
+или в `?key=…` (коннектор claude.ai умеет задавать только URL). Без
+`MCP_SERVICE_KEY` эндпоинт отвечает 404. Перед открытием приложения для
+других людей — заменить на OAuth.
+
+Подключение в claude.ai (свой коннектор):
+`https://bek-bek.layero.app/api/mcp?key=<MCP_SERVICE_KEY>&user=<email>`.
+
 ## Структура
 
 ```
