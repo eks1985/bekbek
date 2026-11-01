@@ -1,0 +1,6 @@
+# Токены Garmin, SQLite и скачанные файлы — только локально / на volume сервера
+data/
+.env
+.venv/
+__pycache__/
+*.pyc
