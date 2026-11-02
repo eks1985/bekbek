@@ -8,9 +8,9 @@
 Библиотека — [`garminconnect`](https://github.com/cyberjunky/python-garminconnect)
 0.3.x (без garth; токены в `garmin_tokens.json`, обновляются сами).
 
-Сейчас готов **шаг 1** — прототип в консоли: проверка сети, вход и пробное
-скачивание. Дальше по плану: SQLite и дедупликация → HTTP API → Docker/Dokploy →
-импорт в bek-bek.
+Готовы шаги 1–4 (см. PLAN.md): прототип на VPS, SQLite-синхронизация, HTTP API
+и деплой в Dokploy — https://garmin.terravitafze.com. Дальше: связка с bek-bek
+(шаги 5–8).
 
 ## Шаг 1 — на VPS, не на ПК
 
@@ -55,13 +55,50 @@ npx tsx scripts/parse-fit.ts garmin-sync/data/<activityId>.fit --workout auto
 
 Итоги в JSON (дистанция, время, круги) должны совпасть с тем, что видно в Garmin Connect.
 
+## Шаг 4 — деплой в Dokploy
+
+Приложение в Dokploy (VPS, http://2.29.21.51:3000), проект `garmin`, собирается
+из этого репо: Build Path `garmin-sync`, Dockerfile `./Dockerfile` (uvicorn,
+порт 8000). Volume — bind mount `/opt/garmin-sync/data` → `/data`: токены,
+SQLite (`garmin.db`) и `.fit`-файлы переживают редеплой. Домен
+`garmin.terravitafze.com` + Let's Encrypt (wildcard DNS `*.terravitafze.com`
+уже смотрит на VPS).
+
+Переменные окружения в Dokploy:
+
+```
+GARMIN_SYNC_TOKEN=<общий секрет с bek-bek>
+GARMIN_TOKEN_DIR=/data/tokens
+GARMIN_FIT_DIR=/data/fit
+GARMIN_DB_PATH=/data/garmin.db
+GARMIN_IMPORT_FROM=2026-09-01   # качать активности с этой даты
+```
+
+Первый вход Garmin нужен, только если токенов ещё нет на volume (после шага 1
+они уже есть):
+
+```bash
+docker exec -it <контейнер> python -m scripts.login
+```
+
+Проверка после деплоя: `curl https://garmin.terravitafze.com/health` →
+`garmin_logged_in:true`; `POST /sync` с токеном качает новое; редеплой не
+теряет токены и SQLite.
+
 ## Что где лежит
 
-- `app/config.py` — пути из env (`GARMIN_TOKEN_DIR`, `GARMIN_FIT_DIR`).
+- `app/config.py` — настройки из env (пути, секрет, троттлинг, IMPORT_FROM).
 - `app/garmin_client.py` — вход по токенам, список активностей, скачивание
   ORIGINAL (zip → `.fit`, проверка заголовка `.FIT`).
+- `app/store.py` — SQLite: таблицы `activities` и `meta` (last_sync_at).
+- `app/sync.py` — `sync_once()`: список → новое → скачать; ошибка одной
+  активности не валит остальные (status=failed, attempts+1).
+- `app/main.py` — FastAPI: /health, /sync, /activities, /activities/{id}/fit;
+  bearer-секрет, троттлинг, lock.
 - `scripts/check_network.py` — DNS и HTTPS до хостов Garmin, без логина и зависимостей.
 - `scripts/login.py` — однократный вход по паролю, пароль не сохраняется; без DI-токена честно падает.
 - `scripts/try_download.py` — ручная проверка шага 1.
+- `scripts/sync_cli.py` — синхронизация руками (то же, что POST /sync).
+- `Dockerfile` — python:3.12-slim + uvicorn.
 - `data/` — токены и файлы, в git не попадает. Токены дают доступ к аккаунту
   Garmin — обращаться как с паролем.

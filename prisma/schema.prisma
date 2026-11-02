@@ -33,7 +33,11 @@ model FitFile {
   uploadedAt   DateTime @default(now())
   workout      Workout?
 
+  source           String  @default("upload") // "upload" | "garmin"
+  garminActivityId String? // id активности в Garmin Connect — есть только у source="garmin"
+
   @@unique([userId, sha256])
+  @@unique([userId, garminActivityId])
   @@index([userId, uploadedAt])
   @@map("fit_files")
 }

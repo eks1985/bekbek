@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/auth/session";
 import { LogoutButton } from "@/components/logout-button";
 import { FitUpload } from "@/components/fit-files/fit-upload";
 import { FitFileList } from "@/components/fit-files/fit-file-list";
+import { GarminSyncOnOpen } from "@/components/garmin/garmin-sync-on-open";
 import {
   Card,
   CardContent,
@@ -17,6 +18,11 @@ export default async function DashboardPage() {
   // requireUser сам уведёт на /login, если не вошёл, и вернёт пользователя.
   const user = await requireUser();
 
+  // Один аккаунт Garmin привязан к одному email — автосинк только у владельца.
+  const isGarminOwner =
+    !!process.env.GARMIN_OWNER_EMAIL &&
+    user.email.toLowerCase() === process.env.GARMIN_OWNER_EMAIL.toLowerCase();
+
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
       <Card className="w-full">
@@ -29,6 +35,7 @@ export default async function DashboardPage() {
             Аккаунт: <span className="font-medium text-foreground">{user.email}</span>
           </p>
           <LogoutButton />
+          {isGarminOwner && <GarminSyncOnOpen />}
         </CardContent>
       </Card>
 
