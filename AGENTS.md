@@ -41,6 +41,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 - Краткое описание изменения по-русски, без conventional-префиксов: «Темп без „/км“ везде: сводка, темп отрезков, вывод парсера», «БД: таблицы fit_files и workouts для FIT-файлов и результатов парсинга». Ориентироваться на `git log`.
 
+## SSH с этого ПК: только System32 OpenSSH
+
+- `ssh`/`scp` из Git Bash (MSYS, `/usr/bin/ssh`) на этой машине зависают: соединения уходят через виртуальный адаптер (10.6.7.1) и не завершаются, а принудительно остановленная сессия оставляет висячий ssh-процесс с открытым соединением — они копятся и мешают новым.
+- Для любых `ssh`/`scp` использовать Windows OpenSSH — в Git Bash это `/c/Windows/System32/OpenSSH/ssh.exe` и `/c/Windows/System32/OpenSSH/scp.exe`, всегда с `-o BatchMode=yes`.
+- Если MSYS-ssh всё же зависли: `ps -W | grep '/usr/bin/ssh'` → WINPID (4-й столбец) → `taskkill //F //PID <WINPID>`. Сессии `C:\Windows\System32\OpenSSH\ssh.exe`, запущенные не агентом, не трогать — это обычно живая сессия человека.
+- VPS для garmin-sync — `root@2.29.21.51` (Ubuntu, Docker): код в `~/bekbek`, токены Garmin и скачанные FIT — в `/opt/garmin-sync/data`. Повторные запуски — docker-командой из README garmin-sync; логин по паролю не нужен, токены уже сохранены.
+
 ## Этот файл
 
 - `AGENTS.md` закоммичен и общий для команды и кодинг-агентов; изменения в него вносятся обычными коммитами.
