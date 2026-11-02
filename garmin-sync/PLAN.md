@@ -80,9 +80,10 @@ https://garmin.terravitafze.com (Dokploy, проект `garmin`). Дальше �
 `garmin-sync/Dockerfile` (python:3.12-slim, uvicorn), `.dockerignore`, `garmin-sync/README.md` (деплой, первый логин, переменные). В Dokploy: приложение из этого репо, Build Path `garmin-sync`, volume → `/data`, домен + HTTPS, env: `GARMIN_SYNC_TOKEN`, `GARMIN_TOKEN_DIR=/data/tokens`, `GARMIN_DB_PATH=/data/garmin.db`, `GARMIN_FIT_DIR=/data/fit`, `GARMIN_IMPORT_FROM=<дата>`. Первый вход — `docker exec -it <контейнер> python -m scripts.login` (токены лягут на volume и переживут редеплой).
 - **Проверка:** `curl https://<домен>/health` извне; `POST /sync` с токеном работает с VPS (значит, Garmin пускает немецкий IP); редеплой не теряет токены и SQLite.
 
-### Шаг 5. Проверка связи Layero → VPS (до основной логики bek-bek)
+### Шаг 5. Проверка связи Layero → VPS (до основной логики bek-bek) — код готов (2026-11-02), прод-проверка — после деплоя
 В bek-bek: `src/lib/garmin/client.ts` (fetch к сервису с bearer, таймауты, `server-only`) и `GET /api/garmin/status` (только для сессии владельца) → проксирует `/health`. Env в Layero: `GARMIN_SYNC_URL`, `GARMIN_SYNC_TOKEN`, `GARMIN_OWNER_EMAIL`. Пуш в main = деплой — только с подтверждения пользователя.
 - **Проверка:** на https://bek-bek.layero.app/api/garmin/status приходит ответ сервиса, время ответа разумное. Если не проходит — переключаемся на push-вариант (сервис POST-ит в bek-bek) до того, как писать шаг 7.
+- Локально (одноразовый Postgres на VPS, `npx prisma migrate deploy`, `next dev`): без сессии — 401; сессия владельца (email = `GARMIN_OWNER_EMAIL`) — 200 с реальным ответом сервиса (`garmin_logged_in:true`, `response_ms:76`); сессия другого пользователя — 401. Настоящая проверка связи Layero(РФ) → VPS(DE) — только после деплоя на прод (нужны env `GARMIN_SYNC_URL`/`GARMIN_SYNC_TOKEN`/`GARMIN_OWNER_EMAIL` в Layero и пуш в main с подтверждения пользователя).
 
 ### Шаг 6. bek-bek: миграция и общий код сохранения файла
 - `prisma/schema.prisma`, модель `FitFile`: `source String @default("upload")` (`upload` | `garmin`), `garminActivityId String?`, `@@unique([userId, garminActivityId])`. Чистое добавление → по README сначала `db:deploy` на прод (с подтверждения), потом код.
