@@ -8,7 +8,7 @@ import { deleteObject, putObject } from "@/lib/storage/s3";
 
 export const MAX_FIT_SIZE_BYTES = 10 * 1024 * 1024;
 
-export type UploadedFitFile = {
+export type SavedFitFile = {
   id: string;
   originalName: string;
   sizeBytes: number;
@@ -19,8 +19,10 @@ export type UploadedFitFile = {
   parseError?: string;
 };
 
-export type UploadResult =
-  | { ok: true; file: UploadedFitFile }
+export type SaveFitExtra = { source?: "upload" | "garmin"; garminActivityId?: string };
+
+export type SaveFitResult =
+  | { ok: true; file: SavedFitFile; attached?: boolean }
   | { ok: false; status: 400 | 409; error: string };
 
 /** Заголовок FIT: байты 8–11 — ASCII ".FIT". */
@@ -34,27 +36,38 @@ function isFitFile(bytes: Uint8Array): boolean {
   );
 }
 
-/**
- * Кладёт FIT-файл в бакет (fit/<userId>/<id>.fit) и пишет строку fit_files.
- * Не зависит от транспорта — вызывается из route handler, потом может и из экшена.
- */
-export async function uploadFitFile(
-  userId: string,
-  file: File,
-): Promise<UploadResult> {
-  const originalName = file.name.slice(0, 255) || "file.fit";
+const WORKOUT_SELECT = {
+  id: true,
+  originalName: true,
+  sizeBytes: true,
+  uploadedAt: true,
+  workout: { select: { startTime: true, distanceM: true, workoutTag: true } },
+} as const;
 
-  if (!originalName.toLowerCase().endsWith(".fit")) {
+/**
+ * Кладёт байты FIT-файла в бакет (fit/<userId>/<id>.fit) и пишет строку fit_files.
+ * Общий код для ручной загрузки и импорта из Garmin — источник не зависит от
+ * транспорта. Дубликат по sha256 (uploadFitFile.userId_sha256) не создаёт
+ * вторую строку: если это импорт из Garmin того же файла, что раньше залили
+ * руками, просто проставляем garminActivityId существующей строке.
+ */
+export async function saveFitBytes(
+  userId: string,
+  bytes: Uint8Array,
+  originalName: string,
+  extra: SaveFitExtra = {},
+): Promise<SaveFitResult> {
+  const name = originalName.slice(0, 255) || "file.fit";
+
+  if (!name.toLowerCase().endsWith(".fit")) {
     return { ok: false, status: 400, error: "Нужен файл с расширением .fit" };
   }
-  if (file.size === 0) {
+  if (bytes.length === 0) {
     return { ok: false, status: 400, error: "Файл пустой" };
   }
-  if (file.size > MAX_FIT_SIZE_BYTES) {
+  if (bytes.length > MAX_FIT_SIZE_BYTES) {
     return { ok: false, status: 400, error: "Файл больше 10 МБ" };
   }
-
-  const bytes = new Uint8Array(await file.arrayBuffer());
   if (!isFitFile(bytes)) {
     return { ok: false, status: 400, error: "Это не FIT-файл" };
   }
@@ -62,9 +75,17 @@ export async function uploadFitFile(
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const duplicate = await db.fitFile.findUnique({
     where: { userId_sha256: { userId, sha256 } },
-    select: { id: true },
+    select: { garminActivityId: true, ...WORKOUT_SELECT },
   });
   if (duplicate) {
+    if (extra.garminActivityId && !duplicate.garminActivityId) {
+      const row = await db.fitFile.update({
+        where: { id: duplicate.id },
+        data: { garminActivityId: extra.garminActivityId },
+        select: WORKOUT_SELECT,
+      });
+      return { ok: true, file: row, attached: true };
+    }
     return { ok: false, status: 409, error: "Этот файл уже загружен" };
   }
 
@@ -79,10 +100,10 @@ export async function uploadFitFile(
   let workout: ReturnType<typeof workoutRow> | null = null;
   let parseError: string | undefined;
   try {
-    workout = workoutRow(parseWorkout(bytes, { fileName: originalName, workout: "auto" }));
+    workout = workoutRow(parseWorkout(bytes, { fileName: name, workout: "auto" }));
   } catch (err) {
     parseError = err instanceof Error ? err.message : String(err);
-    console.error(`Не удалось разобрать ${originalName}:`, err);
+    console.error(`Не удалось разобрать ${name}:`, err);
   }
 
   try {
@@ -91,18 +112,14 @@ export async function uploadFitFile(
         id,
         userId,
         storageKey,
-        originalName,
+        originalName: name,
         sizeBytes: bytes.length,
         sha256,
+        source: extra.source ?? "upload",
+        garminActivityId: extra.garminActivityId ?? null,
         ...(workout ? { workout: { create: { userId, ...workout } } } : {}),
       },
-      select: {
-        id: true,
-        originalName: true,
-        sizeBytes: true,
-        uploadedAt: true,
-        workout: { select: { startTime: true, distanceM: true, workoutTag: true } },
-      },
+      select: WORKOUT_SELECT,
     });
     return { ok: true, file: { ...row, parseError } };
   } catch (err) {
@@ -117,4 +134,18 @@ export async function uploadFitFile(
     }
     throw err;
   }
+}
+
+/** Тонкая обёртка над saveFitBytes для формы ручной загрузки. */
+export async function uploadFitFile(
+  userId: string,
+  file: File,
+): Promise<SaveFitResult> {
+  const originalName = file.name.slice(0, 255) || "file.fit";
+  if (!originalName.toLowerCase().endsWith(".fit")) {
+    return { ok: false, status: 400, error: "Нужен файл с расширением .fit" };
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return saveFitBytes(userId, bytes, originalName, { source: "upload" });
 }
