@@ -27,8 +27,21 @@ def main() -> None:
     # TOKEN_DIR/garmin_tokens.json (права 600, папка 700).
     api.login(str(TOKEN_DIR))
 
+    # Если обмен тикета на DI-токен не прошёл (diauth.garmin.com недоступен),
+    # библиотека может «войти» через cookie веб-портала — но на диск сохраняются
+    # только DI-токены, и следующий запуск снова потребует пароль. Не делаем
+    # вид, что всё хорошо.
+    token_file = TOKEN_DIR / "garmin_tokens.json"
+    if not (api.client.di_token and api.client.di_refresh_token and token_file.exists()):
+        token_file.unlink(missing_ok=True)
+        raise SystemExit(
+            "Пароль принят, но DI-токен не получен — сохранять нечего.\n"
+            "Скорее всего, из этой сети недоступен diauth.garmin.com. "
+            "Проверьте: python -m scripts.check_network"
+        )
+
     print(f"Готово: вошли как {api.get_full_name() or api.display_name}.")
-    print(f"Токены: {TOKEN_DIR / 'garmin_tokens.json'}")
+    print(f"Токены: {token_file}")
 
 
 if __name__ == "__main__":
