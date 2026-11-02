@@ -4,23 +4,45 @@
     POST /sync                    спросить Garmin и скачать новое (троттлинг, lock)
     GET  /activities?since=ISO    список из SQLite
     GET  /activities/{id}/fit     байты .fit
+    GET  /auth                    страница обновления токена (пароль Garmin, без авторизации)
+    POST /auth/start              шаг 1 входа: email+пароль
+    POST /auth/finish             шаг 2: код MFA, если понадобился
 
-Всё, кроме /health, — под общим секретом: Authorization: Bearer <GARMIN_SYNC_TOKEN>.
-Синхронный garminconnect уходит в threadpool, чтобы не блокировать event loop.
+Всё, кроме /health и /auth (GET, сама форма), — под общим секретом:
+Authorization: Bearer <GARMIN_SYNC_TOKEN>. Синхронный garminconnect уходит
+в threadpool, чтобы не блокировать event loop (FastAPI сам запускает обычные
+def-хендлеры в threadpool, poэтому /auth/* — не async).
 """
 
 import asyncio
+import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app import garmin_client, store, sync
 from app.config import SYNC_MIN_INTERVAL_SEC, SYNC_TOKEN, TOKEN_DIR
 
 _sync_lock = asyncio.Lock()
+
+# Незавершённые входы (ждут код MFA): attempt_id -> (поставлено, client_state).
+# В памяти процесса — переживать редеплой не нужно, вход всё равно начинают заново.
+_PENDING_LOGINS: dict[str, tuple[float, Any]] = {}
+_LOGIN_ATTEMPT_TTL_SEC = 300
+
+
+def _cleanup_pending_logins() -> None:
+    now = time.time()
+    expired = [k for k, (ts, _) in _PENDING_LOGINS.items() if now - ts > _LOGIN_ATTEMPT_TTL_SEC]
+    for k in expired:
+        _PENDING_LOGINS.pop(k, None)
 
 
 @asynccontextmanager
@@ -87,3 +109,143 @@ def activity_fit(activity_id: str, _: None = Depends(require_token)) -> Response
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{activity_id}.fit"'},
     )
+
+
+class AuthStartBody(BaseModel):
+    email: str
+    password: str
+
+
+class AuthFinishBody(BaseModel):
+    attempt_id: str
+    code: str
+
+
+@app.post("/auth/start", dependencies=[Depends(require_token)])
+def auth_start(body: AuthStartBody) -> dict:
+    """Шаг 1 входа (см. PLAN.md, брейншторм про обновление токена — вариант А)."""
+    _cleanup_pending_logins()
+    try:
+        needs_mfa, client_state = garmin_client.start_login(body.email, body.password)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not needs_mfa:
+        return {"needs_mfa": False}
+    attempt_id = secrets.token_urlsafe(16)
+    _PENDING_LOGINS[attempt_id] = (time.time(), client_state)
+    return {"needs_mfa": True, "attempt_id": attempt_id}
+
+
+@app.post("/auth/finish", dependencies=[Depends(require_token)])
+def auth_finish(body: AuthFinishBody) -> dict:
+    """Шаг 2: код MFA довершает вход, начатый /auth/start."""
+    _cleanup_pending_logins()
+    entry = _PENDING_LOGINS.pop(body.attempt_id, None)
+    if not entry:
+        raise HTTPException(
+            status_code=400, detail="Попытка входа не найдена или истекла — начните заново"
+        )
+    _, client_state = entry
+    try:
+        garmin_client.finish_login(client_state, body.code)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True}
+
+
+_AUTH_PAGE = """<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>garmin-sync — обновить вход</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; }
+  label { display: block; margin-top: 12px; font-size: 14px; color: #333; }
+  input { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
+  button { margin-top: 16px; padding: 8px 16px; cursor: pointer; }
+  #msg { margin-top: 16px; white-space: pre-wrap; }
+  .err { color: #b00020; }
+  .ok { color: #0a7a2f; }
+  #mfa-block { display: none; }
+</style>
+</head>
+<body>
+<h3>garmin-sync — обновить вход в Garmin</h3>
+<p>Токен сервиса (GARMIN_SYNC_TOKEN), email и пароль Garmin никуда кроме этого
+сервиса не уходят — страница шлёт их напрямую на этот же домен.</p>
+
+<div id="start-block">
+  <label>Токен сервиса <input id="token" type="password" autocomplete="off"></label>
+  <label>Email Garmin <input id="email" type="email" autocomplete="off"></label>
+  <label>Пароль Garmin <input id="password" type="password" autocomplete="off"></label>
+  <button id="start-btn">Войти</button>
+</div>
+
+<div id="mfa-block">
+  <label>Код MFA (из письма/приложения) <input id="code" type="text" autocomplete="off"></label>
+  <button id="finish-btn">Подтвердить</button>
+</div>
+
+<div id="msg"></div>
+
+<script>
+let attemptId = null;
+
+function msg(text, cls) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = cls || '';
+}
+
+document.getElementById('start-btn').onclick = async () => {
+  const token = document.getElementById('token').value;
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  msg('Входим…');
+  try {
+    const res = await fetch('/auth/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) { msg(data.detail || 'Ошибка входа', 'err'); return; }
+    if (data.needs_mfa) {
+      attemptId = data.attempt_id;
+      document.getElementById('mfa-block').style.display = 'block';
+      msg('Введите код MFA — он уже должен прийти.', 'ok');
+    } else {
+      msg('Готово — вход выполнен, токены сохранены.', 'ok');
+    }
+  } catch (e) {
+    msg('Сеть недоступна: ' + e, 'err');
+  }
+};
+
+document.getElementById('finish-btn').onclick = async () => {
+  const token = document.getElementById('token').value;
+  const code = document.getElementById('code').value;
+  msg('Подтверждаем код…');
+  try {
+    const res = await fetch('/auth/finish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ attempt_id: attemptId, code }),
+    });
+    const data = await res.json();
+    if (!res.ok) { msg(data.detail || 'Ошибка подтверждения', 'err'); return; }
+    msg('Готово — вход выполнен, токены сохранены.', 'ok');
+  } catch (e) {
+    msg('Сеть недоступна: ' + e, 'err');
+  }
+};
+</script>
+</body>
+</html>"""
+
+
+@app.get("/auth", response_class=HTMLResponse)
+def auth_page() -> str:
+    """Форма обновления токена Garmin. Сама страница не секрет — ничего не
+    отправляет и не показывает без ввода GARMIN_SYNC_TOKEN в поле."""
+    return _AUTH_PAGE

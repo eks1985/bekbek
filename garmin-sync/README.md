@@ -85,6 +85,20 @@ docker exec -it <контейнер> python -m scripts.login
 `garmin_logged_in:true`; `POST /sync` с токеном качает новое; редеплой не
 теряет токены и SQLite.
 
+## Обновить токен самостоятельно (без ssh на VPS)
+
+Токен Garmin живёт примерно год. Когда протухнет (`garmin_logged_in:false` в
+`/health` и в `/api/garmin/status` bek-bek), обновить его можно прямо в
+браузере, без ssh и `docker exec`:
+
+1. Откройте `https://garmin.terravitafze.com/auth`.
+2. Введите токен сервиса (`GARMIN_SYNC_TOKEN`), email и пароль Garmin.
+3. Если придёт MFA — введите код во втором поле.
+
+Пароль и токен уходят только на этот домен (браузер → VPS → Garmin), bek-bek
+и Layero в этом не участвуют. Страница ничего не запоминает — при следующем
+обновлении токен сервиса нужно ввести заново.
+
 ## Что где лежит
 
 - `app/config.py` — настройки из env (пути, секрет, троттлинг, IMPORT_FROM).
@@ -93,8 +107,9 @@ docker exec -it <контейнер> python -m scripts.login
 - `app/store.py` — SQLite: таблицы `activities` и `meta` (last_sync_at).
 - `app/sync.py` — `sync_once()`: список → новое → скачать; ошибка одной
   активности не валит остальные (status=failed, attempts+1).
-- `app/main.py` — FastAPI: /health, /sync, /activities, /activities/{id}/fit;
-  bearer-секрет, троттлинг, lock.
+- `app/main.py` — FastAPI: /health, /sync, /activities, /activities/{id}/fit,
+  /auth (страница) + /auth/start, /auth/finish (обновление токена); bearer-секрет,
+  троттлинг, lock.
 - `scripts/check_network.py` — DNS и HTTPS до хостов Garmin, без логина и зависимостей.
 - `scripts/login.py` — однократный вход по паролю, пароль не сохраняется; без DI-токена честно падает.
 - `scripts/try_download.py` — ручная проверка шага 1.

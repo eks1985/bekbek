@@ -5,6 +5,7 @@ import hashlib
 import io
 import zipfile
 from dataclasses import dataclass
+from typing import Any
 
 from garminconnect import Garmin
 
@@ -12,7 +13,8 @@ from app.config import TOKEN_DIR
 
 
 class NotLoggedInError(RuntimeError):
-    """Токенов нет или Garmin их не принял — нужен python -m scripts.login."""
+    """Токенов нет или Garmin их не принял — нужен новый вход (python -m scripts.login
+    или POST /auth/start на этом же сервисе)."""
 
 
 def connect() -> Garmin:
@@ -33,6 +35,43 @@ def connect() -> Garmin:
             f"Garmin не принял сохранённые токены ({e}). Войдите заново: python -m scripts.login"
         ) from e
     return api
+
+
+def _dump_and_verify(api: Garmin) -> None:
+    """Сохраняет токены в TOKEN_DIR и проверяет, что DI-токен реально записался
+    (та же проверка, что в scripts.login — иначе Garmin мог «войти» через
+    cookie веб-портала, а на диск сохранять нечего)."""
+    TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    api.client.dump(str(TOKEN_DIR))
+    token_file = TOKEN_DIR / "garmin_tokens.json"
+    if not (api.client.di_token and api.client.di_refresh_token and token_file.exists()):
+        token_file.unlink(missing_ok=True)
+        raise RuntimeError(
+            "Пароль принят, но DI-токен не получен — сохранять нечего. "
+            "Скорее всего, недоступен diauth.garmin.com — проверьте python -m scripts.check_network"
+        )
+
+
+def start_login(email: str, password: str) -> tuple[bool, Any]:
+    """Начинает вход по email/паролю без интерактивного prompt_mfa — для шага 1
+    HTTP-формы на /auth. Если MFA не нужен — токены уже сохранены, возвращает
+    (False, None). Если нужен — возвращает (True, client_state); client_state
+    хранит сессионные cookie, обращаться с ним как с паролем."""
+    api = Garmin(email=email, password=password, return_on_mfa=True)
+    mfa_status, client_state = api.login()
+    if mfa_status == "needs_mfa":
+        return True, client_state
+    _dump_and_verify(api)
+    return False, None
+
+
+def finish_login(client_state: Any, mfa_code: str) -> None:
+    """Шаг 2: код MFA довершает вход, начатый start_login. Новый инстанс
+    Garmin — library это поддерживает явно (resume_login документирован как
+    работающий с другим объектом/процессом)."""
+    api = Garmin(return_on_mfa=True)
+    api.resume_login(client_state, mfa_code)
+    _dump_and_verify(api)
 
 
 @dataclass
