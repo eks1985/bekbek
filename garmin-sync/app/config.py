@@ -8,6 +8,14 @@ TOKEN_DIR = Path(os.getenv("GARMIN_TOKEN_DIR", "./data/tokens"))
 FIT_DIR = Path(os.getenv("GARMIN_FIT_DIR", "./data/fit"))
 DB_PATH = Path(os.getenv("GARMIN_DB_PATH", "./data/garmin.db"))
 
+
+def token_dir_for(user_id: str) -> Path:
+    return TOKEN_DIR / user_id
+
+
+def fit_dir_for(user_id: str) -> Path:
+    return FIT_DIR / user_id
+
 # Общий секрет с bek-bek; пустой = все эндпоинты, кроме /health, всегда 403
 SYNC_TOKEN = os.getenv("GARMIN_SYNC_TOKEN", "")
 

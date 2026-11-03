@@ -1,14 +1,14 @@
 import { buildGarminAuthLink, getGarminHealth } from "@/lib/garmin/client";
 
 /**
- * Рендерится только владельцу (см. dashboard/page.tsx). Если сервис
- * недоступен — молчим, не роняем dashboard: это необязательная подсказка,
- * не критичная функциональность.
+ * Рендерится каждому залогиненному пользователю — у каждого свой Garmin-аккаунт,
+ * изоляция по userId. Если сервис недоступен — молчим, не роняем dashboard:
+ * это необязательная подсказка, не критичная функциональность.
  */
-export async function GarminStatusBanner() {
+export async function GarminStatusBanner({ userId }: { userId: string }) {
   let loggedIn: boolean;
   try {
-    loggedIn = (await getGarminHealth()).garmin_logged_in;
+    loggedIn = (await getGarminHealth(userId)).garmin_logged_in;
   } catch {
     return null;
   }
@@ -18,7 +18,7 @@ export async function GarminStatusBanner() {
     <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
       <p className="font-medium">Garmin отключён — токен устарел.</p>
       <a
-        href={buildGarminAuthLink()}
+        href={buildGarminAuthLink(userId)}
         className="mt-1 inline-block underline underline-offset-2 hover:no-underline"
       >
         Обновить вход в Garmin →

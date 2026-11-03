@@ -39,8 +39,8 @@ async function garminFetch(
   }
 }
 
-export async function getGarminHealth(): Promise<GarminHealth> {
-  const res = await garminFetch("/health");
+export async function getGarminHealth(userId: string): Promise<GarminHealth> {
+  const res = await garminFetch(`/users/${userId}/health`);
   if (!res.ok) {
     throw new Error(`garmin-sync /health ответил ${res.status}`);
   }
@@ -55,8 +55,8 @@ export type GarminSyncResult = {
 };
 
 /** POST /sync сервиса может реально сходить в Garmin — таймаут больше, чем у /health. */
-export async function triggerGarminSync(): Promise<GarminSyncResult> {
-  const res = await garminFetch("/sync", { method: "POST" }, 20000);
+export async function triggerGarminSync(userId: string): Promise<GarminSyncResult> {
+  const res = await garminFetch(`/users/${userId}/sync`, { method: "POST" }, 20000);
   if (!res.ok) {
     throw new Error(`garmin-sync /sync ответил ${res.status}`);
   }
@@ -73,16 +73,19 @@ export type GarminActivity = {
   status: string;
 };
 
-export async function listGarminActivities(): Promise<GarminActivity[]> {
-  const res = await garminFetch("/activities");
+export async function listGarminActivities(userId: string): Promise<GarminActivity[]> {
+  const res = await garminFetch(`/users/${userId}/activities`);
   if (!res.ok) {
     throw new Error(`garmin-sync /activities ответил ${res.status}`);
   }
   return res.json();
 }
 
-export async function downloadGarminFit(activityId: string | number): Promise<Uint8Array> {
-  const res = await garminFetch(`/activities/${activityId}/fit`, {}, 15000);
+export async function downloadGarminFit(
+  userId: string,
+  activityId: string | number,
+): Promise<Uint8Array> {
+  const res = await garminFetch(`/users/${userId}/activities/${activityId}/fit`, {}, 15000);
   if (!res.ok) {
     throw new Error(`garmin-sync /activities/${activityId}/fit ответил ${res.status}`);
   }
@@ -92,12 +95,13 @@ export async function downloadGarminFit(activityId: string | number): Promise<Ui
 /**
  * Ссылка на /auth сервиса с короткоживущей (10 мин) HMAC-подписью вместо
  * ручного ввода GARMIN_SYNC_TOKEN — тот же секрет, что и для серверных
- * вызовов, отдельного не заводим. Сервис проверяет подпись независимо
- * (require_token_or_link в garmin-sync/app/main.py).
+ * вызовов, отдельного не заводим. Подпись по "<userId>:<exp>" — ссылку
+ * одного пользователя нельзя переиспользовать для входа в чужой аккаунт.
+ * Сервис проверяет независимо (require_token_or_link в garmin-sync/app/main.py).
  */
-export function buildGarminAuthLink(): string {
+export function buildGarminAuthLink(userId: string): string {
   const { baseUrl, token } = config();
   const exp = Math.floor(Date.now() / 1000) + AUTH_LINK_TTL_SEC;
-  const sig = createHmac("sha256", token).update(String(exp)).digest("hex");
-  return `${baseUrl}/auth?link=${exp}.${sig}`;
+  const sig = createHmac("sha256", token).update(`${userId}:${exp}`).digest("hex");
+  return `${baseUrl}/users/${userId}/auth?link=${exp}.${sig}`;
 }

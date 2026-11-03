@@ -1,20 +1,28 @@
-"""HTTP-обёртка (шаг 3): FastAPI поверх sync/store.
+"""HTTP-обёртка поверх sync/store/garmin_client. Несколько пользователей —
+каждый в своём namespace по user_id (bek-bek передаёт его, обычно это
+userId из своей БД); данные на диске и в SQLite разделены per-user.
 
-    GET  /health                  без авторизации: живость + last_sync_at + есть ли токены
-    POST /sync                    спросить Garmin и скачать новое (троттлинг, lock)
-    GET  /activities?since=ISO    список из SQLite
-    GET  /activities/{id}/fit     байты .fit
-    GET  /auth                    страница обновления токена (пароль Garmin, без авторизации)
-    POST /auth/start              шаг 1 входа: email+пароль
-    POST /auth/finish             шаг 2: код MFA, если понадобился
+    GET  /health                            без авторизации: процесс жив
+    GET  /users/{user_id}/health             без авторизации: last_sync_at + есть ли токены у этого user_id
+    POST /users/{user_id}/sync               спросить Garmin и скачать новое (троттлинг, lock — per-user)
+    GET  /users/{user_id}/activities?since=ISO
+    GET  /users/{user_id}/activities/{id}/fit
+    GET  /users/{user_id}/auth                страница обновления токена (без авторизации)
+    POST /users/{user_id}/auth/start          шаг 1 входа: email+пароль
+    POST /users/{user_id}/auth/finish         шаг 2: код MFA, если понадобился
 
-Всё, кроме /health и /auth (GET, сама форма), — под общим секретом:
-Authorization: Bearer <GARMIN_SYNC_TOKEN>. /auth/start и /auth/finish вдобавок
-принимают короткоживущую (10 мин) HMAC-подписанную ссылку с dashboard bek-bek
-(?link=<exp>.<sig>, см. require_token_or_link) — так пользователю не нужно
-вводить GARMIN_SYNC_TOKEN руками, если он уже вошёл в bek-bek. Синхронный
-garminconnect уходит в threadpool, чтобы не блокировать event loop (FastAPI
-сам запускает обычные def-хендлеры в threadpool, poэтому /auth/* — не async).
+Всё, кроме /health и /users/{user_id}/auth (GET, сама форма), — под общим
+секретом: Authorization: Bearer <GARMIN_SYNC_TOKEN>. Это доверие к bek-bek как
+к серверу (он сам знает, какой у него сейчас пользователь, и передаёт его
+user_id в пути) — отдельного секрета на каждого человека не заводим, это были
+бы 3-5 токенов ради 3-5 пользователей без дополнительной защиты.
+
+auth/start и auth/finish вдобавок принимают короткоживущую (10 мин)
+HMAC-подписанную ссылку с dashboard bek-bek (?link=<exp>.<sig>, подпись по
+"<user_id>:<exp>" — так ссылку одного пользователя нельзя переиспользовать
+для входа в чужой user_id, см. require_token_or_link). Синхронный
+garminconnect уходит в threadpool — FastAPI сам запускает обычные
+def-хендлеры там, поэтому /auth/* — не async.
 """
 
 import asyncio
@@ -34,19 +42,27 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app import garmin_client, store, sync
-from app.config import AUTH_RETURN_URL, SYNC_MIN_INTERVAL_SEC, SYNC_TOKEN, TOKEN_DIR
+from app.config import AUTH_RETURN_URL, SYNC_MIN_INTERVAL_SEC, SYNC_TOKEN, token_dir_for
 
-_sync_lock = asyncio.Lock()
+_sync_locks: dict[str, asyncio.Lock] = {}
 
-# Незавершённые входы (ждут код MFA): attempt_id -> (поставлено, client_state).
+
+def _lock_for(user_id: str) -> asyncio.Lock:
+    lock = _sync_locks.get(user_id)
+    if lock is None:
+        lock = _sync_locks[user_id] = asyncio.Lock()
+    return lock
+
+
+# Незавершённые входы (ждут код MFA): attempt_id -> (поставлено, user_id, client_state).
 # В памяти процесса — переживать редеплой не нужно, вход всё равно начинают заново.
-_PENDING_LOGINS: dict[str, tuple[float, Any]] = {}
+_PENDING_LOGINS: dict[str, tuple[float, str, Any]] = {}
 _LOGIN_ATTEMPT_TTL_SEC = 300
 
 
 def _cleanup_pending_logins() -> None:
     now = time.time()
-    expired = [k for k, (ts, _) in _PENDING_LOGINS.items() if now - ts > _LOGIN_ATTEMPT_TTL_SEC]
+    expired = [k for k, (ts, _, _) in _PENDING_LOGINS.items() if now - ts > _LOGIN_ATTEMPT_TTL_SEC]
     for k in expired:
         _PENDING_LOGINS.pop(k, None)
 
@@ -71,20 +87,20 @@ def require_token(request: Request) -> None:
 _LINK_TOKEN_TTL_SEC = 600  # 10 минут — время на форму + код MFA
 
 
-def _valid_link_token(token: str) -> bool:
+def _valid_link_token(user_id: str, token: str) -> bool:
     """Короткоживущая ссылка из bek-bek: "<exp_unix>.<hmac>", подписана тем же
-    GARMIN_SYNC_TOKEN — отдельного секрета между сервисами не заводим. Годится
-    только для входа (/auth/*), остальные роуты её не принимают."""
+    GARMIN_SYNC_TOKEN по "<user_id>:<exp>" — чужую ссылку для другого user_id
+    не переиспользовать. Годится только для входа (/auth/*)."""
     if not SYNC_TOKEN or "." not in token:
         return False
     exp_str, _, sig = token.partition(".")
     if not exp_str.isdigit() or time.time() > int(exp_str):
         return False
-    expected = hmac.new(SYNC_TOKEN.encode(), exp_str.encode(), sha256).hexdigest()
+    expected = hmac.new(SYNC_TOKEN.encode(), f"{user_id}:{exp_str}".encode(), sha256).hexdigest()
     return hmac.compare_digest(expected, sig)
 
 
-def require_token_or_link(request: Request) -> None:
+def require_token_or_link(user_id: str, request: Request) -> None:
     """Для /auth/start и /auth/finish: обычный GARMIN_SYNC_TOKEN (ручной ввод,
     серверные вызовы) ИЛИ короткоживущая подписанная ссылка с dashboard bek-bek."""
     auth = request.headers.get("authorization", "")
@@ -93,7 +109,7 @@ def require_token_or_link(request: Request) -> None:
     presented = auth.removeprefix("Bearer ")
     if SYNC_TOKEN and presented == SYNC_TOKEN:
         return
-    if _valid_link_token(presented):
+    if _valid_link_token(user_id, presented):
         return
     raise HTTPException(status_code=401, detail="неверный или истёкший токен/ссылка")
 
@@ -104,37 +120,44 @@ def _seconds_since(iso: str) -> float:
 
 @app.get("/health")
 def health() -> dict:
+    """Общая живость процесса — для Dokploy/мониторинга, без привязки к пользователю."""
+    return {"ok": True}
+
+
+@app.get("/users/{user_id}/health")
+def user_health(user_id: str) -> dict:
     return {
         "ok": True,
-        "last_sync_at": store.get_meta("last_sync_at"),
-        "garmin_logged_in": (TOKEN_DIR / "garmin_tokens.json").exists(),
+        "last_sync_at": store.get_meta(user_id, "last_sync_at"),
+        "garmin_logged_in": (token_dir_for(user_id) / "garmin_tokens.json").exists(),
     }
 
 
-@app.post("/sync")
-async def do_sync(_: None = Depends(require_token)) -> dict:
-    last = store.get_meta("last_sync_at")
+@app.post("/users/{user_id}/sync")
+async def do_sync(user_id: str, _: None = Depends(require_token)) -> dict:
+    last = store.get_meta(user_id, "last_sync_at")
     if last and _seconds_since(last) < SYNC_MIN_INTERVAL_SEC:
         return {"checked_at": last, "downloaded": [], "failed": [], "throttled": True}
-    if _sync_lock.locked():  # второй параллельный вызов не ждёт и не ходит в Garmin
+    lock = _lock_for(user_id)
+    if lock.locked():  # второй параллельный вызов того же пользователя не ждёт и не ходит в Garmin
         return {"checked_at": last, "downloaded": [], "failed": [], "throttled": True, "busy": True}
-    async with _sync_lock:
+    async with lock:
         try:
-            result = await run_in_threadpool(sync.sync_once)
+            result = await run_in_threadpool(sync.sync_once, user_id)
         except garmin_client.NotLoggedInError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
     return {**result, "throttled": False}
 
 
-@app.get("/activities")
-def activities(since: str | None = None, _: None = Depends(require_token)) -> list[dict]:
+@app.get("/users/{user_id}/activities")
+def activities(user_id: str, since: str | None = None, _: None = Depends(require_token)) -> list[dict]:
     fields = ("activity_id", "start_time", "activity_type", "name", "sha256", "size_bytes", "status")
-    return [{k: row[k] for k in fields} for row in store.list_activities(since)]
+    return [{k: row[k] for k in fields} for row in store.list_activities(user_id, since)]
 
 
-@app.get("/activities/{activity_id}/fit")
-def activity_fit(activity_id: str, _: None = Depends(require_token)) -> Response:
-    row = store.get(activity_id)
+@app.get("/users/{user_id}/activities/{activity_id}/fit")
+def activity_fit(user_id: str, activity_id: str, _: None = Depends(require_token)) -> Response:
+    row = store.get(user_id, activity_id)
     if not row or row["status"] != "downloaded" or not row["fit_path"]:
         raise HTTPException(status_code=404, detail=f"активность {activity_id} не скачана")
     path = Path(row["fit_path"])
@@ -157,33 +180,35 @@ class AuthFinishBody(BaseModel):
     code: str
 
 
-@app.post("/auth/start", dependencies=[Depends(require_token_or_link)])
-def auth_start(body: AuthStartBody) -> dict:
-    """Шаг 1 входа (см. PLAN.md, брейншторм про обновление токена — вариант А)."""
+@app.post("/users/{user_id}/auth/start", dependencies=[Depends(require_token_or_link)])
+def auth_start(user_id: str, body: AuthStartBody) -> dict:
+    """Шаг 1 входа (см. PLAN.md — обновление токена, вариант А)."""
     _cleanup_pending_logins()
     try:
-        needs_mfa, client_state = garmin_client.start_login(body.email, body.password)
+        needs_mfa, client_state = garmin_client.start_login(
+            body.email, body.password, token_dir_for(user_id)
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not needs_mfa:
         return {"needs_mfa": False}
     attempt_id = secrets.token_urlsafe(16)
-    _PENDING_LOGINS[attempt_id] = (time.time(), client_state)
+    _PENDING_LOGINS[attempt_id] = (time.time(), user_id, client_state)
     return {"needs_mfa": True, "attempt_id": attempt_id}
 
 
-@app.post("/auth/finish", dependencies=[Depends(require_token_or_link)])
-def auth_finish(body: AuthFinishBody) -> dict:
+@app.post("/users/{user_id}/auth/finish", dependencies=[Depends(require_token_or_link)])
+def auth_finish(user_id: str, body: AuthFinishBody) -> dict:
     """Шаг 2: код MFA довершает вход, начатый /auth/start."""
     _cleanup_pending_logins()
     entry = _PENDING_LOGINS.pop(body.attempt_id, None)
-    if not entry:
+    if not entry or entry[1] != user_id:
         raise HTTPException(
             status_code=400, detail="Попытка входа не найдена или истекла — начните заново"
         )
-    _, client_state = entry
+    _, _, client_state = entry
     try:
-        garmin_client.finish_login(client_state, body.code)
+        garmin_client.finish_login(client_state, body.code, token_dir_for(user_id))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True}
@@ -228,6 +253,8 @@ _AUTH_PAGE_TEMPLATE = """<!doctype html>
 
 <script>
 const RETURN_URL = __RETURN_URL_JSON__;
+// Путь вида /users/<id>/auth — свой user_id для каждого человека.
+const userId = location.pathname.split('/')[2];
 const linkToken = new URLSearchParams(location.search).get('link');
 let attemptId = null;
 
@@ -262,7 +289,7 @@ document.getElementById('start-btn').onclick = async () => {
   const password = document.getElementById('password').value;
   msg('Входим…');
   try {
-    const res = await fetch('/auth/start', {
+    const res = await fetch(`/users/${userId}/auth/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authHeader() },
       body: JSON.stringify({ email, password }),
@@ -285,7 +312,7 @@ document.getElementById('finish-btn').onclick = async () => {
   const code = document.getElementById('code').value;
   msg('Подтверждаем код…');
   try {
-    const res = await fetch('/auth/finish', {
+    const res = await fetch(`/users/${userId}/auth/finish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authHeader() },
       body: JSON.stringify({ attempt_id: attemptId, code }),
@@ -304,9 +331,10 @@ document.getElementById('finish-btn').onclick = async () => {
 _AUTH_PAGE = _AUTH_PAGE_TEMPLATE.replace("__RETURN_URL_JSON__", json.dumps(AUTH_RETURN_URL))
 
 
-@app.get("/auth", response_class=HTMLResponse)
-def auth_page() -> str:
-    """Форма обновления токена Garmin. Сама страница не секрет — ничего не
-    отправляет и не показывает без ввода GARMIN_SYNC_TOKEN (или подписанной
+@app.get("/users/{user_id}/auth", response_class=HTMLResponse)
+def auth_page(user_id: str) -> str:
+    """Форма обновления токена Garmin для конкретного user_id (страница одна
+    и та же для всех — JS сам берёт user_id из пути). Не секрет сама по себе —
+    ничего не отправляет и не показывает без GARMIN_SYNC_TOKEN (или подписанной
     ссылки с dashboard bek-bek, см. require_token_or_link) в поле."""
     return _AUTH_PAGE

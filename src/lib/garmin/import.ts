@@ -24,11 +24,11 @@ const IMPORT_LIMIT_PER_CALL = 5;
 export async function syncFromGarmin(userId: string): Promise<GarminImportSummary> {
   // Лучшее усилие: даже если сервис троттлит или недоступен, всё равно
   // смотрим, что уже лежит на VPS по прошлым синкам.
-  await triggerGarminSync().catch((err) => {
+  await triggerGarminSync(userId).catch((err) => {
     console.error("garmin-sync /sync недоступен, продолжаем по тому, что уже скачано", err);
   });
 
-  const activities = await listGarminActivities();
+  const activities = await listGarminActivities(userId);
 
   const known = await db.fitFile.findMany({
     where: { userId, garminActivityId: { not: null } },
@@ -47,7 +47,7 @@ export async function syncFromGarmin(userId: string): Promise<GarminImportSummar
 
   for (const activity of batch) {
     try {
-      const bytes = await downloadGarminFit(activity.activity_id);
+      const bytes = await downloadGarminFit(userId, activity.activity_id);
       const result = await saveFitBytes(userId, bytes, `${activity.activity_id}.fit`, {
         source: "garmin",
         garminActivityId: String(activity.activity_id),

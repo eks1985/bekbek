@@ -19,14 +19,9 @@ export default async function DashboardPage() {
   // requireUser сам уведёт на /login, если не вошёл, и вернёт пользователя.
   const user = await requireUser();
 
-  // Один аккаунт Garmin привязан к одному email — автосинк только у владельца.
-  const isGarminOwner =
-    !!process.env.GARMIN_OWNER_EMAIL &&
-    user.email.toLowerCase() === process.env.GARMIN_OWNER_EMAIL.toLowerCase();
-
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
-      {isGarminOwner && <GarminStatusBanner />}
+      <GarminStatusBanner userId={user.id} />
 
       <Card className="w-full">
         <CardHeader>
@@ -38,7 +33,7 @@ export default async function DashboardPage() {
             Аккаунт: <span className="font-medium text-foreground">{user.email}</span>
           </p>
           <LogoutButton />
-          {isGarminOwner && <GarminSyncOnOpen />}
+          <GarminSyncOnOpen />
         </CardContent>
       </Card>
 
