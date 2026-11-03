@@ -3,6 +3,7 @@ import { LogoutButton } from "@/components/logout-button";
 import { FitUpload } from "@/components/fit-files/fit-upload";
 import { FitFileList } from "@/components/fit-files/fit-file-list";
 import { GarminSyncOnOpen } from "@/components/garmin/garmin-sync-on-open";
+import { GarminStatusBanner } from "@/components/garmin/garmin-status-banner";
 import {
   Card,
   CardContent,
@@ -25,6 +26,8 @@ export default async function DashboardPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
+      {isGarminOwner && <GarminStatusBanner />}
+
       <Card className="w-full">
         <CardHeader>
           <CardTitle>Вы вошли</CardTitle>
