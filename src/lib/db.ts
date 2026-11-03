@@ -6,6 +6,14 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+/**
+ * Схема Postgres с таблицами приложения. Своя, а не `public`: база общая с
+ * MG Dealer/MG CRM и другими проектами, а имена таблиц (users, sessions,
+ * login_codes, rate_hits) у приложений совпадают. Та же схема задаётся
+ * для миграций в prisma.config.ts (?schema=).
+ */
+export const DB_SCHEMA = "bekbek";
+
 function createClient(): PrismaClient {
   // На Layero строку подключения к базе платформа кладёт в LAYERO_DATABASE_URL
   // (в DATABASE_URL она не пишет, чтобы не перекрыть переменную пользователя).
@@ -19,10 +27,13 @@ function createClient(): PrismaClient {
   // TLS задаётся самой строкой: у базы Layero в ней sslmode, а сертификат
   // (Let's Encrypt) node-pg проверяет по системным корням Node. Локальный
   // Postgres — строка без sslmode, без шифрования.
-  const adapter = new PrismaPg({
-    connectionString,
-    max: 3, // маленький пул под serverless
-  });
+  const adapter = new PrismaPg(
+    {
+      connectionString,
+      max: 3, // маленький пул под serverless
+    },
+    { schema: DB_SCHEMA },
+  );
 
   return new PrismaClient({
     adapter,

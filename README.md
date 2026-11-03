@@ -174,7 +174,7 @@ Remove-Item C:\Users\kefimov\bek-bek-prod-db.txt
 
 ```powershell
 npx layero@latest db sql bek-bek -c "select migration_name, finished_at from _prisma_migrations"
-npx layero@latest db sql bek-bek -c "select table_name from information_schema.tables where table_schema='public'"
+npx layero@latest db sql bek-bek -c "select table_name from information_schema.tables where table_schema='bekbek'"
 ```
 
 ⚠️ Не оставляйте прод-адрес в переменной: следующий `npm run dev` или

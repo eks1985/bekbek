@@ -34,7 +34,8 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const adapter = new PrismaPg({ connectionString });
+// Схема — как DB_SCHEMA в src/lib/db.ts: без неё пользователь лёг бы в public.
+const adapter = new PrismaPg({ connectionString }, { schema: "bekbek" });
 const db = new PrismaClient({ adapter });
 
 const user = await db.user.upsert({
