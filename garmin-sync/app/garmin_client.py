@@ -1,49 +1,49 @@
 """Тонкий слой над garminconnect: вход по сохранённым токенам, список
-активностей, скачивание оригинального FIT."""
+активностей, скачивание оригинального FIT. Везде по явному token_dir —
+у каждого пользователя свой (см. config.token_dir_for)."""
 
 import hashlib
 import io
 import zipfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from garminconnect import Garmin
 
-from app.config import TOKEN_DIR
-
 
 class NotLoggedInError(RuntimeError):
     """Токенов нет или Garmin их не принял — нужен новый вход (python -m scripts.login
-    или POST /auth/start на этом же сервисе)."""
+    или POST /users/{user_id}/auth/start на этом же сервисе)."""
 
 
-def connect() -> Garmin:
-    """Клиент Garmin по токенам из TOKEN_DIR, без логина и пароля.
+def connect(token_dir: Path) -> Garmin:
+    """Клиент Garmin по токенам из token_dir, без логина и пароля.
 
     Библиотека сама обновляет истекающий токен и записывает новый обратно
-    в TOKEN_DIR/garmin_tokens.json, поэтому вход вручную нужен раз в долгое время.
+    в token_dir/garmin_tokens.json, поэтому вход вручную нужен раз в долгое время.
     """
-    if not (TOKEN_DIR / "garmin_tokens.json").exists():
+    if not (token_dir / "garmin_tokens.json").exists():
         raise NotLoggedInError(
-            f"Нет токенов в {TOKEN_DIR}. Сначала войдите: python -m scripts.login"
+            f"Нет токенов в {token_dir}. Сначала войдите: /auth этого пользователя"
         )
     api = Garmin()
     try:
-        api.login(str(TOKEN_DIR))
+        api.login(str(token_dir))
     except Exception as e:  # библиотека бросает разные типы — для нас это одно
         raise NotLoggedInError(
-            f"Garmin не принял сохранённые токены ({e}). Войдите заново: python -m scripts.login"
+            f"Garmin не принял сохранённые токены ({e}). Войдите заново через /auth."
         ) from e
     return api
 
 
-def _dump_and_verify(api: Garmin) -> None:
-    """Сохраняет токены в TOKEN_DIR и проверяет, что DI-токен реально записался
+def _dump_and_verify(api: Garmin, token_dir: Path) -> None:
+    """Сохраняет токены в token_dir и проверяет, что DI-токен реально записался
     (та же проверка, что в scripts.login — иначе Garmin мог «войти» через
     cookie веб-портала, а на диск сохранять нечего)."""
-    TOKEN_DIR.mkdir(parents=True, exist_ok=True)
-    api.client.dump(str(TOKEN_DIR))
-    token_file = TOKEN_DIR / "garmin_tokens.json"
+    token_dir.mkdir(parents=True, exist_ok=True)
+    api.client.dump(str(token_dir))
+    token_file = token_dir / "garmin_tokens.json"
     if not (api.client.di_token and api.client.di_refresh_token and token_file.exists()):
         token_file.unlink(missing_ok=True)
         raise RuntimeError(
@@ -52,7 +52,7 @@ def _dump_and_verify(api: Garmin) -> None:
         )
 
 
-def start_login(email: str, password: str) -> tuple[bool, Any]:
+def start_login(email: str, password: str, token_dir: Path) -> tuple[bool, Any]:
     """Начинает вход по email/паролю без интерактивного prompt_mfa — для шага 1
     HTTP-формы на /auth. Если MFA не нужен — токены уже сохранены, возвращает
     (False, None). Если нужен — возвращает (True, client_state); client_state
@@ -61,17 +61,17 @@ def start_login(email: str, password: str) -> tuple[bool, Any]:
     mfa_status, client_state = api.login()
     if mfa_status == "needs_mfa":
         return True, client_state
-    _dump_and_verify(api)
+    _dump_and_verify(api, token_dir)
     return False, None
 
 
-def finish_login(client_state: Any, mfa_code: str) -> None:
+def finish_login(client_state: Any, mfa_code: str, token_dir: Path) -> None:
     """Шаг 2: код MFA довершает вход, начатый start_login. Новый инстанс
     Garmin — library это поддерживает явно (resume_login документирован как
     работающий с другим объектом/процессом)."""
     api = Garmin(return_on_mfa=True)
     api.resume_login(client_state, mfa_code)
-    _dump_and_verify(api)
+    _dump_and_verify(api, token_dir)
 
 
 @dataclass
@@ -97,10 +97,17 @@ def to_activity_info(raw: dict) -> ActivityInfo:
     )
 
 
+def list_range(api: Garmin, start: int, limit: int) -> list[ActivityInfo]:
+    """Активности постранично (новые сверху), start — смещение от самой свежей.
+    Используется и для обычного синка (start=0), и для подгрузки истории
+    (start растёт по мере того, сколько уже просмотрено)."""
+    raw = api.get_activities(start, limit)
+    return [to_activity_info(a) for a in raw if isinstance(a, dict) and "activityId" in a]
+
+
 def list_recent(api: Garmin, limit: int = 20) -> list[ActivityInfo]:
     """Последние активности, новые сверху."""
-    raw = api.get_activities(0, limit)
-    return [to_activity_info(a) for a in raw if isinstance(a, dict) and "activityId" in a]
+    return list_range(api, 0, limit)
 
 
 def is_fit(data: bytes) -> bool:

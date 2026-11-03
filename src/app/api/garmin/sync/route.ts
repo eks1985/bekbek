@@ -4,11 +4,9 @@ import { syncFromGarmin } from "@/lib/garmin/import";
 
 export const runtime = "nodejs";
 
-/** Только владелец (один аккаунт Garmin на один email в bek-bek) может синкать. */
 export async function POST() {
   const user = await getSession();
-  const ownerEmail = process.env.GARMIN_OWNER_EMAIL;
-  if (!user || !ownerEmail || user.email.toLowerCase() !== ownerEmail.toLowerCase()) {
+  if (!user) {
     return NextResponse.json({ error: "Нужно войти" }, { status: 401 });
   }
 

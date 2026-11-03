@@ -9,8 +9,9 @@
 0.3.x (без garth; токены в `garmin_tokens.json`, обновляются сами).
 
 Готовы шаги 1–4 (см. PLAN.md): прототип на VPS, SQLite-синхронизация, HTTP API
-и деплой в Dokploy — https://garmin.terravitafze.com. Дальше: связка с bek-bek
-(шаги 5–8).
+и деплой в Dokploy — https://garmin.terravitafze.com. Сервис многопользовательский:
+у каждого пользователя bek-bek — свой Garmin-аккаунт, данные разделены по `user_id`
+(обычно это `userId` из базы bek-bek) — см. «Что где лежит».
 
 ## Шаг 1 — на VPS, не на ПК
 
@@ -37,9 +38,9 @@ cd ~/bekbek/garmin-sync && docker run -it --rm -v "$PWD":/app -v /opt/garmin-syn
 ```bash
 python -m scripts.check_network        # все хосты должны быть OK; иначе дальше не идём
 pip install -q -r requirements.txt
-python -m scripts.login                # email, пароль, код MFA → /data/tokens/garmin_tokens.json
-python -m scripts.try_download         # 10 последних активностей + FIT последней
-python -m scripts.try_download 24300728659   # или конкретная по id
+python -m scripts.login <user_id>              # email, пароль, код MFA → /data/tokens/<user_id>/garmin_tokens.json
+python -m scripts.try_download <user_id>       # 10 последних активностей + FIT последней
+python -m scripts.try_download <user_id> 24300728659   # или конкретная по id
 exit
 ```
 
@@ -75,49 +76,70 @@ GARMIN_IMPORT_FROM=2026-09-01   # качать активности с этой 
 AUTH_RETURN_URL=https://bek-bek.layero.app/dashboard   # куда вернуть после входа на /auth
 ```
 
-Первый вход Garmin нужен, только если токенов ещё нет на volume (после шага 1
-они уже есть):
+Первый вход Garmin — проще через `/users/<user_id>/auth` в браузере (см. ниже)
+или руками, если токенов для этого `user_id` ещё нет на volume:
 
 ```bash
-docker exec -it <контейнер> python -m scripts.login
+docker exec -it <контейнер> python -m scripts.login <user_id>
 ```
 
 Проверка после деплоя: `curl https://garmin.terravitafze.com/health` →
-`garmin_logged_in:true`; `POST /sync` с токеном качает новое; редеплой не
-теряет токены и SQLite.
+`{"ok":true}` (жив процесс); `curl .../users/<user_id>/health` →
+`garmin_logged_in:true` для уже вошедших; `POST /users/<user_id>/sync` с
+токеном качает новое; редеплой не теряет токены и SQLite.
 
-## Обновить токен самостоятельно (без ssh на VPS)
+## Вход и обновление токена самостоятельно (без ssh на VPS)
 
-Токен Garmin живёт примерно год. Когда протухнет, на dashboard bek-bek
-появляется баннер «Garmin отключён» со ссылкой на `/auth` — переходите по
-ней, вводите email и пароль Garmin (и код MFA, если попросит), после успеха
-страница сама возвращает в bek-bek. Токен сервиса (`GARMIN_SYNC_TOKEN`)
-вводить не нужно: ссылка с dashboard уже несёт короткоживущую (10 минут)
-HMAC-подпись на этом же секрете — bek-bek и garmin-sync оба его знают,
-по сети он не передаётся. Подпись годится только для входа (`/auth/start`,
-`/auth/finish`), не даёт доступа к `/sync` или скачиванию тренировок.
+Каждый пользователь bek-bek подключает свой Garmin-аккаунт сам, без участия
+админа. Токен Garmin живёт примерно год; когда протухнет (или ещё не заведён),
+на dashboard bek-bek появляется баннер «Garmin отключён» со ссылкой на
+`/users/<user_id>/auth` — переходите по ней, вводите email и пароль Garmin
+(и код MFA, если попросит), после успеха страница сама возвращает в bek-bek.
+Токен сервиса (`GARMIN_SYNC_TOKEN`) вводить не нужно: ссылка с dashboard уже
+несёт короткоживущую (10 минут) HMAC-подпись по `"<user_id>:<exp>"` на этом же
+секрете — bek-bek и garmin-sync оба его знают, по сети он не передаётся.
+Ссылка одного пользователя не подходит для входа в чужой `user_id` (подпись
+это проверяет), и годится только для входа (`/auth/start`, `/auth/finish`) —
+не даёт доступа к `/sync` или скачиванию тренировок.
 
-Зайти можно и напрямую, минуя bek-bek, — `https://garmin.terravitafze.com/auth`
-без `?link=...` в адресе покажет поле «Токен сервиса» для ручного ввода, как раньше.
+Зайти можно и напрямую, минуя bek-bek, — `https://garmin.terravitafze.com/users/<user_id>/auth`
+без `?link=...` в адресе покажет поле «Токен сервиса» для ручного ввода (нужно
+знать свой `user_id` — это `id` строки пользователя в БД bek-bek).
 
 Пароль (и токен/подпись) уходят только на этот домен (браузер → VPS → Garmin),
 Layero в самом входе не участвует — он только генерирует ссылку.
 
 ## Что где лежит
 
-- `app/config.py` — настройки из env (пути, секрет, троттлинг, IMPORT_FROM).
-- `app/garmin_client.py` — вход по токенам, список активностей, скачивание
-  ORIGINAL (zip → `.fit`, проверка заголовка `.FIT`).
-- `app/store.py` — SQLite: таблицы `activities` и `meta` (last_sync_at).
-- `app/sync.py` — `sync_once()`: список → новое → скачать; ошибка одной
-  активности не валит остальные (status=failed, attempts+1).
-- `app/main.py` — FastAPI: /health, /sync, /activities, /activities/{id}/fit,
-  /auth (страница) + /auth/start, /auth/finish (обновление токена); bearer-секрет,
-  троттлинг, lock.
+Сервис многопользовательский: везде, где это важно, первый сегмент пути —
+`/users/{user_id}/...`. `user_id` — произвольная строка, которую передаёт
+bek-bek (обычно свой `userId` из БД); регистрировать пользователей заранее
+не нужно — каталоги и строки в SQLite создаются лениво, при первом входе
+через `/auth`.
+
+- `app/config.py` — настройки из env (пути, секрет, троттлинг, IMPORT_FROM) +
+  `token_dir_for(user_id)`/`fit_dir_for(user_id)` — пути на диске per-user.
+- `app/garmin_client.py` — вход по токенам (принимает `token_dir` явно), список
+  активностей, скачивание ORIGINAL (zip → `.fit`, проверка заголовка `.FIT`).
+- `app/store.py` — SQLite: `activities` и `meta` с составным ключом
+  `(user_id, ...)`, `PRAGMA journal_mode=WAL`.
+- `app/sync.py` — `sync_once(user_id)`: последние `LIST_LIMIT` активностей →
+  новое → скачать в `fit_dir_for(user_id)`; `sync_history(user_id, count)` —
+  подгрузка более старых порциями (смещение в `meta.history_offset`, без учёта
+  `GARMIN_IMPORT_FROM`); ошибка одной активности не валит остальные
+  (status=failed, attempts+1).
+- `app/main.py` — FastAPI: `GET /health` (живость процесса, без user_id);
+  `GET /users/{id}/health`, `POST /users/{id}/sync`, `POST /users/{id}/sync/history?count=N`,
+  `GET /users/{id}/activities`, `GET /users/{id}/activities/{activity_id}/fit`,
+  `GET /users/{id}/auth` (страница) + `POST /users/{id}/auth/start`/`finish`.
+  Общий `GARMIN_SYNC_TOKEN` на все эндпоинты (доверие к bek-bek-серверу);
+  `/auth/start`/`/auth/finish` вдобавок принимают короткоживущую подписанную
+  ссылку с dashboard. Троттлинг и lock синка — per-user (словари по `user_id`);
+  у `/sync/history` троттлинга по времени нет — явный клик, не автоматика.
 - `scripts/check_network.py` — DNS и HTTPS до хостов Garmin, без логина и зависимостей.
-- `scripts/login.py` — однократный вход по паролю, пароль не сохраняется; без DI-токена честно падает.
-- `scripts/try_download.py` — ручная проверка шага 1.
-- `scripts/sync_cli.py` — синхронизация руками (то же, что POST /sync).
+- `scripts/login.py <user_id>` — однократный вход по паролю руками, пароль не сохраняется; без DI-токена честно падает.
+- `scripts/try_download.py <user_id> [activity_id]` — ручная проверка шага 1.
+- `scripts/sync_cli.py <user_id>` — синхронизация руками (то же, что POST /sync).
 - `Dockerfile` — python:3.12-slim + uvicorn.
-- `data/` — токены и файлы, в git не попадает. Токены дают доступ к аккаунту
-  Garmin — обращаться как с паролем.
+- `data/` — токены (per-user подпапки) и файлы, в git не попадает. Токены
+  дают доступ к аккаунту Garmin — обращаться как с паролем.
