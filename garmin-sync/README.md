@@ -123,16 +123,19 @@ bek-bek (обычно свой `userId` из БД); регистрировать
   активностей, скачивание ORIGINAL (zip → `.fit`, проверка заголовка `.FIT`).
 - `app/store.py` — SQLite: `activities` и `meta` с составным ключом
   `(user_id, ...)`, `PRAGMA journal_mode=WAL`.
-- `app/sync.py` — `sync_once(user_id)`: список → новое → скачать в
-  `fit_dir_for(user_id)`; ошибка одной активности не валит остальные
+- `app/sync.py` — `sync_once(user_id)`: последние `LIST_LIMIT` активностей →
+  новое → скачать в `fit_dir_for(user_id)`; `sync_history(user_id, count)` —
+  подгрузка более старых порциями (смещение в `meta.history_offset`, без учёта
+  `GARMIN_IMPORT_FROM`); ошибка одной активности не валит остальные
   (status=failed, attempts+1).
 - `app/main.py` — FastAPI: `GET /health` (живость процесса, без user_id);
-  `GET /users/{id}/health`, `POST /users/{id}/sync`, `GET /users/{id}/activities`,
-  `GET /users/{id}/activities/{activity_id}/fit`, `GET /users/{id}/auth`
-  (страница) + `POST /users/{id}/auth/start`/`finish`. Общий `GARMIN_SYNC_TOKEN`
-  на все эндпоинты (доверие к bek-bek-серверу); `/auth/start`/`/auth/finish`
-  вдобавок принимают короткоживущую подписанную ссылку с dashboard. Троттлинг
-  и lock синка — per-user (словари по `user_id`).
+  `GET /users/{id}/health`, `POST /users/{id}/sync`, `POST /users/{id}/sync/history?count=N`,
+  `GET /users/{id}/activities`, `GET /users/{id}/activities/{activity_id}/fit`,
+  `GET /users/{id}/auth` (страница) + `POST /users/{id}/auth/start`/`finish`.
+  Общий `GARMIN_SYNC_TOKEN` на все эндпоинты (доверие к bek-bek-серверу);
+  `/auth/start`/`/auth/finish` вдобавок принимают короткоживущую подписанную
+  ссылку с dashboard. Троттлинг и lock синка — per-user (словари по `user_id`);
+  у `/sync/history` троттлинга по времени нет — явный клик, не автоматика.
 - `scripts/check_network.py` — DNS и HTTPS до хостов Garmin, без логина и зависимостей.
 - `scripts/login.py <user_id>` — однократный вход по паролю руками, пароль не сохраняется; без DI-токена честно падает.
 - `scripts/try_download.py <user_id> [activity_id]` — ручная проверка шага 1.

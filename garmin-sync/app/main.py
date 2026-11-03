@@ -149,6 +149,22 @@ async def do_sync(user_id: str, _: None = Depends(require_token)) -> dict:
     return {**result, "throttled": False}
 
 
+@app.post("/users/{user_id}/sync/history")
+async def do_sync_history(user_id: str, count: int = 10, _: None = Depends(require_token)) -> dict:
+    """Подгрузка истории по клику «+10 тренировок» в bek-bek — без троттлинга
+    по времени (это явное действие пользователя, не автоматика): только lock,
+    чтобы не столкнуться с обычным /sync того же user_id."""
+    lock = _lock_for(user_id)
+    if lock.locked():
+        return {"downloaded": [], "failed": [], "busy": True}
+    async with lock:
+        try:
+            result = await run_in_threadpool(sync.sync_history, user_id, count)
+        except garmin_client.NotLoggedInError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+    return {**result, "busy": False}
+
+
 @app.get("/users/{user_id}/activities")
 def activities(user_id: str, since: str | None = None, _: None = Depends(require_token)) -> list[dict]:
     fields = ("activity_id", "start_time", "activity_type", "name", "sha256", "size_bytes", "status")

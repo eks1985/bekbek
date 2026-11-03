@@ -63,6 +63,29 @@ export async function triggerGarminSync(userId: string): Promise<GarminSyncResul
   return res.json();
 }
 
+export type GarminHistoryResult = {
+  downloaded: string[];
+  failed: string[];
+  has_more?: boolean;
+  busy?: boolean;
+};
+
+/** Подгрузка следующей порции старых активностей — клик «+10 тренировок». */
+export async function triggerGarminHistorySync(
+  userId: string,
+  count: number,
+): Promise<GarminHistoryResult> {
+  const res = await garminFetch(
+    `/users/${userId}/sync/history?count=${count}`,
+    { method: "POST" },
+    20000,
+  );
+  if (!res.ok) {
+    throw new Error(`garmin-sync /sync/history ответил ${res.status}`);
+  }
+  return res.json();
+}
+
 export type GarminActivity = {
   activity_id: string | number;
   start_time: string | null;

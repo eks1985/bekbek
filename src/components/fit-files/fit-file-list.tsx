@@ -2,8 +2,10 @@ import Link from "next/link";
 import { CirclePlay } from "lucide-react";
 import { listFitFiles, type FitFileListItem } from "@/lib/fit-files/queries";
 import { Button } from "@/components/ui/button";
+import { GarminHistoryButton } from "@/components/garmin/garmin-history-button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -35,6 +37,9 @@ export async function FitFileList({ userId }: { userId: string }) {
       <CardHeader>
         <CardTitle>Загруженные файлы</CardTitle>
         <CardDescription>Всего: {files.length}</CardDescription>
+        <CardAction>
+          <GarminHistoryButton />
+        </CardAction>
       </CardHeader>
       <CardContent>
         {files.length === 0 ? (

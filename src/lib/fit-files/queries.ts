@@ -1,11 +1,20 @@
 import "server-only";
 import { db } from "@/lib/db";
 
-/** Все FIT-файлы пользователя, новые сверху (индекс userId+uploadedAt). */
-export function listFitFiles(userId: string) {
-  return db.fitFile.findMany({
+/**
+ * Все FIT-файлы пользователя, новые сверху — по дате самой тренировки
+ * (workout.startTime), а не по дате загрузки: иначе подгруженная история
+ * (кнопка «+10 тренировок») перемешала бы старые забеги с недавними.
+ * Файлы без разбора (workout = null) не имеют даты тренировки — уходят вниз.
+ *
+ * Сортируем в JS, не в БД: Prisma не даёт задать `nulls: "last"` для поля
+ * через связь (`workout.startTime` обязательное — модификатор принимает
+ * только nullable-колонки), а список у одного пользователя небольшой —
+ * личный лог тренировок, не тысячи строк.
+ */
+export async function listFitFiles(userId: string) {
+  const files = await db.fitFile.findMany({
     where: { userId },
-    orderBy: { uploadedAt: "desc" },
     select: {
       id: true,
       originalName: true,
@@ -22,6 +31,12 @@ export function listFitFiles(userId: string) {
         },
       },
     },
+  });
+
+  return files.sort((a, b) => {
+    const aTime = a.workout?.startTime.getTime() ?? -Infinity;
+    const bTime = b.workout?.startTime.getTime() ?? -Infinity;
+    return aTime !== bTime ? bTime - aTime : b.uploadedAt.getTime() - a.uploadedAt.getTime();
   });
 }
 

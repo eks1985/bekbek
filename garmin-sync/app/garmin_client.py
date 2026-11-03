@@ -97,10 +97,17 @@ def to_activity_info(raw: dict) -> ActivityInfo:
     )
 
 
+def list_range(api: Garmin, start: int, limit: int) -> list[ActivityInfo]:
+    """Активности постранично (новые сверху), start — смещение от самой свежей.
+    Используется и для обычного синка (start=0), и для подгрузки истории
+    (start растёт по мере того, сколько уже просмотрено)."""
+    raw = api.get_activities(start, limit)
+    return [to_activity_info(a) for a in raw if isinstance(a, dict) and "activityId" in a]
+
+
 def list_recent(api: Garmin, limit: int = 20) -> list[ActivityInfo]:
     """Последние активности, новые сверху."""
-    raw = api.get_activities(0, limit)
-    return [to_activity_info(a) for a in raw if isinstance(a, dict) and "activityId" in a]
+    return list_range(api, 0, limit)
 
 
 def is_fit(data: bytes) -> bool:
