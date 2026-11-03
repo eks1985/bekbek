@@ -1,6 +1,8 @@
 import "server-only";
+import { createHmac } from "node:crypto";
 
 const DEFAULT_TIMEOUT_MS = 5000;
+const AUTH_LINK_TTL_SEC = 600; // 10 минут — время на форму + код MFA
 
 export type GarminHealth = {
   ok: boolean;
@@ -85,4 +87,17 @@ export async function downloadGarminFit(activityId: string | number): Promise<Ui
     throw new Error(`garmin-sync /activities/${activityId}/fit ответил ${res.status}`);
   }
   return new Uint8Array(await res.arrayBuffer());
+}
+
+/**
+ * Ссылка на /auth сервиса с короткоживущей (10 мин) HMAC-подписью вместо
+ * ручного ввода GARMIN_SYNC_TOKEN — тот же секрет, что и для серверных
+ * вызовов, отдельного не заводим. Сервис проверяет подпись независимо
+ * (require_token_or_link в garmin-sync/app/main.py).
+ */
+export function buildGarminAuthLink(): string {
+  const { baseUrl, token } = config();
+  const exp = Math.floor(Date.now() / 1000) + AUTH_LINK_TTL_SEC;
+  const sig = createHmac("sha256", token).update(String(exp)).digest("hex");
+  return `${baseUrl}/auth?link=${exp}.${sig}`;
 }

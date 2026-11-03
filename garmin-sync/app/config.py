@@ -19,3 +19,7 @@ SYNC_MIN_INTERVAL_SEC = int(os.getenv("GARMIN_SYNC_MIN_INTERVAL_SEC", "60"))
 MAX_ATTEMPTS = int(os.getenv("GARMIN_MAX_ATTEMPTS", "3"))
 # Активности раньше этой даты не качаем ("2026-10-01"; пусто = качать всё)
 IMPORT_FROM = os.getenv("GARMIN_IMPORT_FROM", "")
+
+# Куда редиректить со страницы /auth после успешного входа (обычно dashboard
+# bek-bek); пусто — страница просто показывает «Готово» без перехода.
+AUTH_RETURN_URL = os.getenv("AUTH_RETURN_URL", "")

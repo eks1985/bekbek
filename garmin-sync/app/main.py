@@ -9,16 +9,22 @@
     POST /auth/finish             шаг 2: код MFA, если понадобился
 
 Всё, кроме /health и /auth (GET, сама форма), — под общим секретом:
-Authorization: Bearer <GARMIN_SYNC_TOKEN>. Синхронный garminconnect уходит
-в threadpool, чтобы не блокировать event loop (FastAPI сам запускает обычные
-def-хендлеры в threadpool, poэтому /auth/* — не async).
+Authorization: Bearer <GARMIN_SYNC_TOKEN>. /auth/start и /auth/finish вдобавок
+принимают короткоживущую (10 мин) HMAC-подписанную ссылку с dashboard bek-bek
+(?link=<exp>.<sig>, см. require_token_or_link) — так пользователю не нужно
+вводить GARMIN_SYNC_TOKEN руками, если он уже вошёл в bek-bek. Синхронный
+garminconnect уходит в threadpool, чтобы не блокировать event loop (FastAPI
+сам запускает обычные def-хендлеры в threadpool, poэтому /auth/* — не async).
 """
 
 import asyncio
+import hmac
+import json
 import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +34,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app import garmin_client, store, sync
-from app.config import SYNC_MIN_INTERVAL_SEC, SYNC_TOKEN, TOKEN_DIR
+from app.config import AUTH_RETURN_URL, SYNC_MIN_INTERVAL_SEC, SYNC_TOKEN, TOKEN_DIR
 
 _sync_lock = asyncio.Lock()
 
@@ -60,6 +66,36 @@ def require_token(request: Request) -> None:
     auth = request.headers.get("authorization", "")
     if not SYNC_TOKEN or auth != f"Bearer {SYNC_TOKEN}":
         raise HTTPException(status_code=401, detail="нужен Authorization: Bearer <GARMIN_SYNC_TOKEN>")
+
+
+_LINK_TOKEN_TTL_SEC = 600  # 10 минут — время на форму + код MFA
+
+
+def _valid_link_token(token: str) -> bool:
+    """Короткоживущая ссылка из bek-bek: "<exp_unix>.<hmac>", подписана тем же
+    GARMIN_SYNC_TOKEN — отдельного секрета между сервисами не заводим. Годится
+    только для входа (/auth/*), остальные роуты её не принимают."""
+    if not SYNC_TOKEN or "." not in token:
+        return False
+    exp_str, _, sig = token.partition(".")
+    if not exp_str.isdigit() or time.time() > int(exp_str):
+        return False
+    expected = hmac.new(SYNC_TOKEN.encode(), exp_str.encode(), sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
+
+
+def require_token_or_link(request: Request) -> None:
+    """Для /auth/start и /auth/finish: обычный GARMIN_SYNC_TOKEN (ручной ввод,
+    серверные вызовы) ИЛИ короткоживущая подписанная ссылка с dashboard bek-bek."""
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="нужен Authorization: Bearer <...>")
+    presented = auth.removeprefix("Bearer ")
+    if SYNC_TOKEN and presented == SYNC_TOKEN:
+        return
+    if _valid_link_token(presented):
+        return
+    raise HTTPException(status_code=401, detail="неверный или истёкший токен/ссылка")
 
 
 def _seconds_since(iso: str) -> float:
@@ -121,7 +157,7 @@ class AuthFinishBody(BaseModel):
     code: str
 
 
-@app.post("/auth/start", dependencies=[Depends(require_token)])
+@app.post("/auth/start", dependencies=[Depends(require_token_or_link)])
 def auth_start(body: AuthStartBody) -> dict:
     """Шаг 1 входа (см. PLAN.md, брейншторм про обновление токена — вариант А)."""
     _cleanup_pending_logins()
@@ -136,7 +172,7 @@ def auth_start(body: AuthStartBody) -> dict:
     return {"needs_mfa": True, "attempt_id": attempt_id}
 
 
-@app.post("/auth/finish", dependencies=[Depends(require_token)])
+@app.post("/auth/finish", dependencies=[Depends(require_token_or_link)])
 def auth_finish(body: AuthFinishBody) -> dict:
     """Шаг 2: код MFA довершает вход, начатый /auth/start."""
     _cleanup_pending_logins()
@@ -153,7 +189,7 @@ def auth_finish(body: AuthFinishBody) -> dict:
     return {"ok": True}
 
 
-_AUTH_PAGE = """<!doctype html>
+_AUTH_PAGE_TEMPLATE = """<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -166,16 +202,18 @@ _AUTH_PAGE = """<!doctype html>
   #msg { margin-top: 16px; white-space: pre-wrap; }
   .err { color: #b00020; }
   .ok { color: #0a7a2f; }
-  #mfa-block { display: none; }
+  #mfa-block, #token-block { display: none; }
 </style>
 </head>
 <body>
 <h3>garmin-sync — обновить вход в Garmin</h3>
-<p>Токен сервиса (GARMIN_SYNC_TOKEN), email и пароль Garmin никуда кроме этого
-сервиса не уходят — страница шлёт их напрямую на этот же домен.</p>
+<p id="intro">Email и пароль Garmin никуда кроме этого сервиса не уходят —
+страница шлёт их напрямую на этот же домен.</p>
 
 <div id="start-block">
-  <label>Токен сервиса <input id="token" type="password" autocomplete="off"></label>
+  <div id="token-block">
+    <label>Токен сервиса <input id="token" type="password" autocomplete="off"></label>
+  </div>
   <label>Email Garmin <input id="email" type="email" autocomplete="off"></label>
   <label>Пароль Garmin <input id="password" type="password" autocomplete="off"></label>
   <button id="start-btn">Войти</button>
@@ -189,7 +227,20 @@ _AUTH_PAGE = """<!doctype html>
 <div id="msg"></div>
 
 <script>
+const RETURN_URL = __RETURN_URL_JSON__;
+const linkToken = new URLSearchParams(location.search).get('link');
 let attemptId = null;
+
+if (linkToken) {
+  document.getElementById('intro').textContent =
+    'Вы уже авторизованы через bek-bek — просто введите email и пароль Garmin.';
+} else {
+  document.getElementById('token-block').style.display = 'block';
+}
+
+function authHeader() {
+  return linkToken || document.getElementById('token').value;
+}
 
 function msg(text, cls) {
   const el = document.getElementById('msg');
@@ -197,15 +248,23 @@ function msg(text, cls) {
   el.className = cls || '';
 }
 
+function onSuccess() {
+  if (RETURN_URL) {
+    msg('Готово — вход выполнен. Возвращаемся в bek-bek…', 'ok');
+    setTimeout(() => { location.href = RETURN_URL; }, 1500);
+  } else {
+    msg('Готово — вход выполнен, токены сохранены.', 'ok');
+  }
+}
+
 document.getElementById('start-btn').onclick = async () => {
-  const token = document.getElementById('token').value;
   const email = document.getElementById('email').value;
   const password = document.getElementById('password').value;
   msg('Входим…');
   try {
     const res = await fetch('/auth/start', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authHeader() },
       body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
@@ -215,7 +274,7 @@ document.getElementById('start-btn').onclick = async () => {
       document.getElementById('mfa-block').style.display = 'block';
       msg('Введите код MFA — он уже должен прийти.', 'ok');
     } else {
-      msg('Готово — вход выполнен, токены сохранены.', 'ok');
+      onSuccess();
     }
   } catch (e) {
     msg('Сеть недоступна: ' + e, 'err');
@@ -223,18 +282,17 @@ document.getElementById('start-btn').onclick = async () => {
 };
 
 document.getElementById('finish-btn').onclick = async () => {
-  const token = document.getElementById('token').value;
   const code = document.getElementById('code').value;
   msg('Подтверждаем код…');
   try {
     const res = await fetch('/auth/finish', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authHeader() },
       body: JSON.stringify({ attempt_id: attemptId, code }),
     });
     const data = await res.json();
     if (!res.ok) { msg(data.detail || 'Ошибка подтверждения', 'err'); return; }
-    msg('Готово — вход выполнен, токены сохранены.', 'ok');
+    onSuccess();
   } catch (e) {
     msg('Сеть недоступна: ' + e, 'err');
   }
@@ -243,9 +301,12 @@ document.getElementById('finish-btn').onclick = async () => {
 </body>
 </html>"""
 
+_AUTH_PAGE = _AUTH_PAGE_TEMPLATE.replace("__RETURN_URL_JSON__", json.dumps(AUTH_RETURN_URL))
+
 
 @app.get("/auth", response_class=HTMLResponse)
 def auth_page() -> str:
     """Форма обновления токена Garmin. Сама страница не секрет — ничего не
-    отправляет и не показывает без ввода GARMIN_SYNC_TOKEN в поле."""
+    отправляет и не показывает без ввода GARMIN_SYNC_TOKEN (или подписанной
+    ссылки с dashboard bek-bek, см. require_token_or_link) в поле."""
     return _AUTH_PAGE
