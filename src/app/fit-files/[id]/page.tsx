@@ -65,7 +65,7 @@ export default async function FitFilePage(props: PageProps<"/fit-files/[id]">) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <WorkoutSummary workout={parsed} />
+              <WorkoutSummary workout={parsed} fitFileId={file.id} />
             </CardContent>
           </Card>
 
