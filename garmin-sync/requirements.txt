@@ -1,5 +1,7 @@
 # Версию держим точной: вход в Garmin и формат токенов меняются между релизами
 # (0.3.x отказался от garth и хранит токены в garmin_tokens.json).
-garminconnect==0.3.20
+# Extra [workout] — типизированные модели структурированных тренировок
+# (app/workout_builder.py), тянет pydantic>=2.4.
+garminconnect[workout]==0.3.20
 fastapi==0.129.0
 uvicorn==0.37.0

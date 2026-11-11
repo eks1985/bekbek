@@ -7,6 +7,7 @@ userId из своей БД); данные на диске и в SQLite разд
     POST /users/{user_id}/sync               спросить Garmin и скачать новое (троттлинг, lock — per-user)
     GET  /users/{user_id}/activities?since=ISO
     GET  /users/{user_id}/activities/{id}/fit
+    POST /users/{user_id}/workouts            создать структурированную тренировку в Garmin Connect
     GET  /users/{user_id}/auth                страница обновления токена (без авторизации)
     POST /users/{user_id}/auth/start          шаг 1 входа: email+пароль
     POST /users/{user_id}/auth/finish         шаг 2: код MFA, если понадобился
@@ -36,12 +37,14 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from typing import Literal
+
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from app import garmin_client, store, sync
+from app import garmin_client, store, sync, workout_builder
 from app.config import AUTH_RETURN_URL, SYNC_MIN_INTERVAL_SEC, SYNC_TOKEN, token_dir_for
 
 _sync_locks: dict[str, asyncio.Lock] = {}
@@ -184,6 +187,62 @@ def activity_fit(user_id: str, activity_id: str, _: None = Depends(require_token
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{activity_id}.fit"'},
     )
+
+
+class PaceRangeBody(BaseModel):
+    fast: str
+    slow: str
+
+
+class StepConditionBody(BaseModel):
+    type: Literal["time", "distance", "lapButton"]
+    durationSec: float | None = None
+    distanceM: float | None = None
+
+
+class RepeatChildBody(BaseModel):
+    kind: Literal["interval", "recovery"]
+    condition: StepConditionBody
+    pace: PaceRangeBody | None = None
+
+
+class WorkoutBlockBody(BaseModel):
+    kind: Literal["warmup", "cooldown", "interval", "recovery", "repeat"]
+    condition: StepConditionBody | None = None
+    pace: PaceRangeBody | None = None
+    iterations: int | None = None
+    steps: list[RepeatChildBody] | None = None
+
+
+class CreateWorkoutBody(BaseModel):
+    workoutName: str
+    blocks: list[WorkoutBlockBody]
+
+
+@app.post("/users/{user_id}/workouts")
+async def create_workout(
+    user_id: str, body: CreateWorkoutBody, _: None = Depends(require_token)
+) -> dict:
+    """Собирает и грузит структурированную тренировку (бег) из схемы
+    конструктора bek-bek — см. app/workout_builder.py. Условие окончания у
+    каждого шага — время/дистанция/кнопка круга (StepCondition в
+    src/lib/structured-workouts/model.ts, та же модель)."""
+    try:
+        api = await run_in_threadpool(garmin_client.connect, token_dir_for(user_id))
+    except garmin_client.NotLoggedInError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    blocks = [b.model_dump(exclude_none=True) for b in body.blocks]
+    try:
+        created = await run_in_threadpool(
+            workout_builder.build_and_upload, api, body.workoutName, blocks
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        "ok": True,
+        "workoutId": created.get("workoutId"),
+        "workoutName": created.get("workoutName"),
+    }
 
 
 class AuthStartBody(BaseModel):

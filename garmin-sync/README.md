@@ -131,11 +131,21 @@ bek-bek (обычно свой `userId` из БД); регистрировать
 - `app/main.py` — FastAPI: `GET /health` (живость процесса, без user_id);
   `GET /users/{id}/health`, `POST /users/{id}/sync`, `POST /users/{id}/sync/history?count=N`,
   `GET /users/{id}/activities`, `GET /users/{id}/activities/{activity_id}/fit`,
+  `POST /users/{id}/workouts` (создать структурированную тренировку, см. ниже),
   `GET /users/{id}/auth` (страница) + `POST /users/{id}/auth/start`/`finish`.
   Общий `GARMIN_SYNC_TOKEN` на все эндпоинты (доверие к bek-bek-серверу);
   `/auth/start`/`/auth/finish` вдобавок принимают короткоживущую подписанную
   ссылку с dashboard. Троттлинг и lock синка — per-user (словари по `user_id`);
   у `/sync/history` троттлинга по времени нет — явный клик, не автоматика.
+- `app/workout_builder.py` — собирает и грузит в Garmin структурированную
+  тренировку (только бег) из JSON-схемы конструктора bek-bek (та же модель,
+  что в `src/lib/structured-workouts/model.ts`): каждый шаг заканчивается по
+  времени, дистанции или кнопке круга. Время/дистанция у `interval` и время у
+  `warmup`/`cooldown`/`recovery` — штатными хелперами `garminconnect.workout`;
+  дистанция у `warmup`/`cooldown`/`recovery` и кнопка круга у любой роли —
+  хелперов нет, шаг собирается вручную (`create_custom_step`, числа
+  `displayOrder` равны самим id типов — проверено по исходнику `0.3.20`, не
+  угадано). `requirements.txt` держит `garminconnect[workout]` ради pydantic.
 - `scripts/check_network.py` — DNS и HTTPS до хостов Garmin, без логина и зависимостей.
 - `scripts/login.py <user_id>` — однократный вход по паролю руками, пароль не сохраняется; без DI-токена честно падает.
 - `scripts/try_download.py <user_id> [activity_id]` — ручная проверка шага 1.
@@ -144,4 +154,5 @@ bek-bek (обычно свой `userId` из БД); регистрировать
 - `data/` — токены (per-user подпапки) и файлы, в git не попадает. Токены
   дают доступ к аккаунту Garmin — обращаться как с паролем.
 - `docs/structured-workouts.md` — заметки: создание структурированных тренировок
-  через garminconnect (модели, календарь, lap-кнопка); реализация — позже.
+  через garminconnect (модели, календарь, lap-кнопка) — реализовано, см.
+  `app/workout_builder.py` и `POST /users/{id}/workouts` выше.

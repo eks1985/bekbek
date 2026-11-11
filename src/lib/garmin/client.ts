@@ -115,6 +115,38 @@ export async function downloadGarminFit(
   return new Uint8Array(await res.arrayBuffer());
 }
 
+export type GarminWorkoutResult = {
+  ok: boolean;
+  workoutId: string | number | null;
+  workoutName: string | null;
+};
+
+/**
+ * Создаёт структурированную тренировку (бег) в Garmin Connect — payload в
+ * форме createWorkoutSchema (src/lib/validation.ts, та же модель, что
+ * конструктор на /structured-workouts). garmin-sync строит её через
+ * app/workout_builder.py и грузит в Garmin под токенами этого пользователя.
+ */
+export async function createGarminWorkout(
+  userId: string,
+  payload: { workoutName: string; blocks: unknown[] },
+): Promise<GarminWorkoutResult> {
+  const res = await garminFetch(
+    `/users/${userId}/workouts`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    20000,
+  );
+  if (!res.ok) {
+    const data: { detail?: string } = await res.json().catch(() => ({}));
+    throw new Error(data.detail ?? `garmin-sync /workouts ответил ${res.status}`);
+  }
+  return res.json();
+}
+
 /**
  * Ссылка на /auth сервиса с короткоживущей (10 мин) HMAC-подписью вместо
  * ручного ввода GARMIN_SYNC_TOKEN — тот же секрет, что и для серверных

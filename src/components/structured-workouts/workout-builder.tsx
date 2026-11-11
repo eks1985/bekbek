@@ -1,12 +1,11 @@
 "use client";
 
-// Прототип конструктора структурированных тренировок (бег): пользователь
-// собирает шаги вручную (разминка/отрезки/повторы/отдых/заминка), у каждого
-// шага — своё условие окончания (время/дистанция/кнопка круга, см. model.ts
-// StepCondition). Видим человеко-читаемое превью и код Python-вызова
-// garminconnect — тот самый, которым создаётся тренировка в реальном
-// Garmin-аккаунте (см. garmin-sync/docs/structured-workouts.md). Отправки в
-// Garmin здесь нет — это следующий шаг после прототипа.
+// Конструктор структурированных тренировок (бег): пользователь собирает шаги
+// вручную (разминка/отрезки/повторы/отдых/заминка), у каждого шага — своё
+// условие окончания (время/дистанция/кнопка круга, см. model.ts
+// StepCondition). Кнопка «Отправить в Garmin Connect» реально создаёт
+// тренировку через /api/garmin/workouts → garmin-sync (app/workout_builder.py);
+// Python-превью ниже показывает тот же вызов текстом.
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { formatDuration } from "@/lib/fit/units";
@@ -150,6 +149,7 @@ export function WorkoutBuilder() {
   const distanceM = totalDistanceM(blocks);
   const durationSec = totalDurationSec(blocks);
   const snippet = generatePythonSnippet(name, blocks);
+  const [sending, setSending] = useState(false);
 
   async function copySnippet() {
     try {
@@ -157,6 +157,33 @@ export function WorkoutBuilder() {
       toast.success("Код скопирован");
     } catch {
       toast.error("Не удалось скопировать — браузер не дал доступ к буферу обмена");
+    }
+  }
+
+  /** Реально создаёт тренировку в Garmin Connect через garmin-sync (см.
+   * app/workout_builder.py — та же логика, что в Python-превью ниже). */
+  async function sendToGarmin() {
+    setSending(true);
+    try {
+      const res = await fetch("/api/garmin/workouts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workoutName: name, blocks }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Не удалось отправить тренировку в Garmin");
+        return;
+      }
+      toast.success(
+        data.workoutId
+          ? `Тренировка создана в Garmin Connect (id ${data.workoutId})`
+          : "Тренировка создана в Garmin Connect",
+      );
+    } catch {
+      toast.error("Сеть недоступна. Попробуйте ещё раз.");
+    } finally {
+      setSending(false);
     }
   }
 
@@ -233,12 +260,22 @@ export function WorkoutBuilder() {
         </CardContent>
       </Card>
 
+      <div>
+        <Button onClick={sendToGarmin} disabled={sending || blocks.length === 0}>
+          {sending ? "Отправляем…" : "Отправить в Garmin Connect"}
+        </Button>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Тренировка появится в Garmin Connect сразу; на часы попадёт при
+          следующей синхронизации устройства.
+        </p>
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>Python для garmin-sync</CardTitle>
           <CardDescription>
-            Вызов garminconnect, которым тренировка создаётся в реальном аккаунте —
-            пока только текст, отправки в Garmin из этой страницы нет.
+            Вызов garminconnect, которым тренировка реально создаётся в Garmin — тот
+            же код выполняется на garmin-sync по кнопке выше (app/workout_builder.py).
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
