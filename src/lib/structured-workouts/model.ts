@@ -1,25 +1,39 @@
 // Модель конструктора структурированных тренировок (прототип, только бег).
 // Блоки соответствуют строительным блокам garminconnect.workout из
-// garmin-sync/docs/structured-workouts.md: Warmup/Cooldown — время,
-// Interval — дистанция + опциональный темп-таргет, Recovery — время,
-// Repeat — повтор нескольких Interval/Recovery. Функции здесь чистые,
-// без знания о React — используются и конструктором, и генератором кода.
+// garmin-sync/docs/structured-workouts.md: Warmup/Cooldown/Interval/Recovery
+// — каждый может закончиться по времени, по дистанции или нажатием кнопки
+// круга (условие окончания задаётся StepCondition одинаково для всех ролей).
+// Repeat — повтор нескольких Interval/Recovery. Функции здесь чистые, без
+// знания о React — используются и конструктором, и генератором кода.
+
+export type StepCondition =
+  | { type: "time"; durationSec: number }
+  | { type: "distance"; distanceM: number }
+  | { type: "lapButton" };
 
 export type PaceRange = { fast: string; slow: string };
 
 export type RepeatChild =
-  | { id: string; kind: "interval"; distanceM: number; pace: PaceRange | null }
-  | { id: string; kind: "recovery"; durationSec: number };
+  | { id: string; kind: "interval"; condition: StepCondition; pace: PaceRange | null }
+  | { id: string; kind: "recovery"; condition: StepCondition };
 
 export type WorkoutBlock =
-  | { id: string; kind: "warmup"; durationSec: number }
-  | { id: string; kind: "cooldown"; durationSec: number }
-  | { id: string; kind: "interval"; distanceM: number; pace: PaceRange | null }
-  | { id: string; kind: "recovery"; durationSec: number }
+  | { id: string; kind: "warmup"; condition: StepCondition }
+  | { id: string; kind: "cooldown"; condition: StepCondition }
+  | { id: string; kind: "interval"; condition: StepCondition; pace: PaceRange | null }
+  | { id: string; kind: "recovery"; condition: StepCondition }
   | { id: string; kind: "repeat"; iterations: number; steps: RepeatChild[] };
 
 export function newId(): string {
   return crypto.randomUUID();
+}
+
+export function timeCondition(durationSec: number): StepCondition {
+  return { type: "time", durationSec };
+}
+
+export function distanceCondition(distanceM: number): StepCondition {
+  return { type: "distance", distanceM };
 }
 
 /** "4:30" → 270, "4:5" → 245. null, если не похоже на мин:сек. */
@@ -49,55 +63,72 @@ export function parsedPaceRange(
   return { fastSecPerKm: Math.min(a, b), slowSecPerKm: Math.max(a, b) };
 }
 
-function intervalDurationSec(distanceM: number, pace: PaceRange | null): number | null {
-  const parsed = parsedPaceRange(pace);
-  if (!parsed) return null;
-  const midSecPerKm = (parsed.fastSecPerKm + parsed.slowSecPerKm) / 2;
-  return (distanceM / 1000) * midSecPerKm;
-}
-
-export function blockDistanceM(block: WorkoutBlock): number {
-  if (block.kind === "interval") return block.distanceM;
-  if (block.kind === "repeat") {
-    const perRound = block.steps.reduce(
-      (sum, s) => sum + (s.kind === "interval" ? s.distanceM : 0),
-      0,
-    );
-    return perRound * block.iterations;
+/**
+ * Дистанция шага, если её вообще можно назвать числом: впрямую — при
+ * условии «дистанция», оценкой через темп — при «время» у отрезка. У
+ * кнопки круга и у «время» без темпа дистанция не определена — 0 (не
+ * участвует в сумме, см. totalDistanceM).
+ */
+function stepDistanceM(condition: StepCondition, pace: PaceRange | null): number {
+  if (condition.type === "distance") return condition.distanceM;
+  if (condition.type === "time") {
+    const parsed = parsedPaceRange(pace);
+    if (!parsed) return 0;
+    const midSecPerKm = (parsed.fastSecPerKm + parsed.slowSecPerKm) / 2;
+    return (condition.durationSec / midSecPerKm) * 1000;
   }
   return 0;
 }
 
-/** null — где-то в цепочке интервал без темп-таргета, оценить время нельзя. */
-export function blockDurationSec(block: WorkoutBlock): number | null {
-  switch (block.kind) {
-    case "warmup":
-    case "cooldown":
-    case "recovery":
-      return block.durationSec;
-    case "interval":
-      return intervalDurationSec(block.distanceM, block.pace);
-    case "repeat": {
-      let perRound = 0;
-      for (const s of block.steps) {
-        if (s.kind === "recovery") {
-          perRound += s.durationSec;
-        } else {
-          const d = intervalDurationSec(s.distanceM, s.pace);
-          if (d === null) return null;
-          perRound += d;
-        }
-      }
-      return perRound * block.iterations;
-    }
+/**
+ * Время шага — null, если не оценить: кнопка круга (решает живой человек),
+ * либо «дистанция» без известного темпа (темп есть только у интервала).
+ */
+function stepDurationSec(condition: StepCondition, pace: PaceRange | null): number | null {
+  if (condition.type === "time") return condition.durationSec;
+  if (condition.type === "lapButton") return null;
+  const parsed = parsedPaceRange(pace);
+  if (!parsed) return null;
+  const midSecPerKm = (parsed.fastSecPerKm + parsed.slowSecPerKm) / 2;
+  return (condition.distanceM / 1000) * midSecPerKm;
+}
+
+function childPace(step: RepeatChild): PaceRange | null {
+  return step.kind === "interval" ? step.pace : null;
+}
+
+export function blockDistanceM(block: WorkoutBlock): number {
+  if (block.kind === "repeat") {
+    const perRound = block.steps.reduce(
+      (sum, s) => sum + stepDistanceM(s.condition, childPace(s)),
+      0,
+    );
+    return perRound * block.iterations;
   }
+  if (block.kind === "interval") return stepDistanceM(block.condition, block.pace);
+  return stepDistanceM(block.condition, null);
+}
+
+/** null — где-то в цепочке шаг с неизвестным временем, оценить нельзя. */
+export function blockDurationSec(block: WorkoutBlock): number | null {
+  if (block.kind === "repeat") {
+    let perRound = 0;
+    for (const s of block.steps) {
+      const d = stepDurationSec(s.condition, childPace(s));
+      if (d === null) return null;
+      perRound += d;
+    }
+    return perRound * block.iterations;
+  }
+  const pace = block.kind === "interval" ? block.pace : null;
+  return stepDurationSec(block.condition, pace);
 }
 
 export function totalDistanceM(blocks: WorkoutBlock[]): number {
   return blocks.reduce((sum, b) => sum + blockDistanceM(b), 0);
 }
 
-/** null, если хоть один блок не оценить (интервал без темпа). */
+/** null, если хоть один блок не оценить. */
 export function totalDurationSec(blocks: WorkoutBlock[]): number | null {
   let total = 0;
   for (const b of blocks) {
@@ -112,13 +143,13 @@ export function totalDurationSec(blocks: WorkoutBlock[]): number | null {
 export function describeBlock(block: WorkoutBlock): string {
   switch (block.kind) {
     case "warmup":
-      return `Разминка, ${formatMinSec(block.durationSec)}`;
+      return `Разминка, ${describeCondition(block.condition)}`;
     case "cooldown":
-      return `Заминка, ${formatMinSec(block.durationSec)}`;
+      return `Заминка, ${describeCondition(block.condition)}`;
     case "recovery":
-      return `Отдых, ${formatMinSec(block.durationSec)}`;
+      return `Отдых, ${describeCondition(block.condition)}`;
     case "interval":
-      return `Отрезок ${block.distanceM} м${describePace(block.pace)}`;
+      return `Отрезок, ${describeCondition(block.condition)}${describePace(block.pace)}`;
     case "repeat":
       return `${block.iterations} × (${block.steps.map(describeChild).join(" + ")})`;
   }
@@ -126,8 +157,19 @@ export function describeBlock(block: WorkoutBlock): string {
 
 function describeChild(step: RepeatChild): string {
   return step.kind === "interval"
-    ? `${step.distanceM} м${describePace(step.pace)}`
-    : `отдых ${formatMinSec(step.durationSec)}`;
+    ? `отрезок ${describeCondition(step.condition)}${describePace(step.pace)}`
+    : `отдых ${describeCondition(step.condition)}`;
+}
+
+function describeCondition(condition: StepCondition): string {
+  switch (condition.type) {
+    case "time":
+      return formatMinSec(condition.durationSec);
+    case "distance":
+      return `${condition.distanceM} м`;
+    case "lapButton":
+      return "по кнопке круга";
+  }
 }
 
 function describePace(pace: PaceRange | null): string {

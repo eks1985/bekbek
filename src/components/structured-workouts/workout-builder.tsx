@@ -1,27 +1,32 @@
 "use client";
 
 // Прототип конструктора структурированных тренировок (бег): пользователь
-// собирает шаги вручную (разминка/отрезки/повторы/отдых/заминка), видим
-// человеко-читаемое превью и код Python-вызова garminconnect — тот самый,
-// которым создаётся тренировка в реальном Garmin-аккаунте (см.
-// garmin-sync/docs/structured-workouts.md). Отправки в Garmin здесь нет —
-// это следующий шаг после прототипа.
+// собирает шаги вручную (разминка/отрезки/повторы/отдых/заминка), у каждого
+// шага — своё условие окончания (время/дистанция/кнопка круга, см. model.ts
+// StepCondition). Видим человеко-читаемое превью и код Python-вызова
+// garminconnect — тот самый, которым создаётся тренировка в реальном
+// Garmin-аккаунте (см. garmin-sync/docs/structured-workouts.md). Отправки в
+// Garmin здесь нет — это следующий шаг после прототипа.
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { formatDuration } from "@/lib/fit/units";
 import {
   describeBlock,
+  distanceCondition,
   newId,
+  timeCondition,
   totalDistanceM,
   totalDurationSec,
   type PaceRange,
   type RepeatChild,
+  type StepCondition,
   type WorkoutBlock,
 } from "@/lib/structured-workouts/model";
 import { generatePythonSnippet } from "@/lib/structured-workouts/python-snippet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Card,
   CardContent,
@@ -33,21 +38,21 @@ import {
 function defaultBlock(kind: WorkoutBlock["kind"]): WorkoutBlock {
   switch (kind) {
     case "warmup":
-      return { id: newId(), kind, durationSec: 600 };
+      return { id: newId(), kind, condition: timeCondition(600) };
     case "cooldown":
-      return { id: newId(), kind, durationSec: 600 };
+      return { id: newId(), kind, condition: timeCondition(600) };
     case "recovery":
-      return { id: newId(), kind, durationSec: 90 };
+      return { id: newId(), kind, condition: timeCondition(90) };
     case "interval":
-      return { id: newId(), kind, distanceM: 400, pace: null };
+      return { id: newId(), kind, condition: distanceCondition(400), pace: null };
     case "repeat":
       return {
         id: newId(),
         kind,
         iterations: 4,
         steps: [
-          { id: newId(), kind: "interval", distanceM: 400, pace: null },
-          { id: newId(), kind: "recovery", durationSec: 90 },
+          { id: newId(), kind: "interval", condition: distanceCondition(400), pace: null },
+          { id: newId(), kind: "recovery", condition: timeCondition(90) },
         ],
       };
   }
@@ -57,17 +62,17 @@ function defaultBlock(kind: WorkoutBlock["kind"]): WorkoutBlock {
 // сервере и клиенте, иначе React.useState(() => [...crypto.randomUUID()])
 // даст разные id при SSR и при гидратации и сломает её.
 const INITIAL_BLOCKS: WorkoutBlock[] = [
-  { id: "seed-warmup", kind: "warmup", durationSec: 600 },
+  { id: "seed-warmup", kind: "warmup", condition: timeCondition(600) },
   {
     id: "seed-repeat",
     kind: "repeat",
     iterations: 4,
     steps: [
-      { id: "seed-repeat-interval", kind: "interval", distanceM: 400, pace: null },
-      { id: "seed-repeat-recovery", kind: "recovery", durationSec: 90 },
+      { id: "seed-repeat-interval", kind: "interval", condition: distanceCondition(400), pace: null },
+      { id: "seed-repeat-recovery", kind: "recovery", condition: timeCondition(90) },
     ],
   },
-  { id: "seed-cooldown", kind: "cooldown", durationSec: 600 },
+  { id: "seed-cooldown", kind: "cooldown", condition: timeCondition(600) },
 ];
 
 export function WorkoutBuilder() {
@@ -108,8 +113,8 @@ export function WorkoutBuilder() {
               steps: [
                 ...b.steps,
                 kind === "interval"
-                  ? { id: newId(), kind, distanceM: 400, pace: null }
-                  : { id: newId(), kind, durationSec: 90 },
+                  ? { id: newId(), kind, condition: distanceCondition(400), pace: null }
+                  : { id: newId(), kind, condition: timeCondition(90) },
               ],
             }
           : b,
@@ -207,7 +212,7 @@ export function WorkoutBuilder() {
           <CardDescription>
             {(distanceM / 1000).toFixed(2)} км
             {durationSec === null
-              ? " · время не оценить — не у всех отрезков задан темп"
+              ? " · время не оценить — не у всех шагов известны и время, и темп"
               : ` · ≈ ${formatDuration(durationSec)}`}
           </CardDescription>
         </CardHeader>
@@ -302,18 +307,14 @@ function BlockCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {(block.kind === "warmup" || block.kind === "cooldown" || block.kind === "recovery") && (
-          <DurationField
-            value={block.durationSec}
-            onChange={(durationSec) => onChange({ durationSec })}
-          />
+          <ConditionFields condition={block.condition} onChange={(condition) => onChange({ condition })} />
         )}
 
         {block.kind === "interval" && (
-          <IntervalFields
-            distanceM={block.distanceM}
-            pace={block.pace}
-            onChange={(next) => onChange(next)}
-          />
+          <div className="flex flex-col gap-3">
+            <ConditionFields condition={block.condition} onChange={(condition) => onChange({ condition })} />
+            <PaceFields pace={block.pace} onChange={(pace) => onChange({ pace })} />
+          </div>
         )}
 
         {block.kind === "repeat" && (
@@ -332,22 +333,17 @@ function BlockCard({
               />
             </div>
 
-            <div className="flex flex-col gap-2 border-l-2 pl-3">
+            <div className="flex flex-col gap-3 border-l-2 pl-3">
               {block.steps.map((step) => (
                 <div key={step.id} className="flex items-start gap-2">
-                  <div className="flex-1">
-                    {step.kind === "interval" ? (
-                      <IntervalFields
-                        distanceM={step.distanceM}
-                        pace={step.pace}
-                        onChange={(next) => onChangeChild(step.id, next)}
-                      />
-                    ) : (
-                      <DurationField
-                        label="Отдых, сек"
-                        value={step.durationSec}
-                        onChange={(durationSec) => onChangeChild(step.id, { durationSec })}
-                      />
+                  <div className="flex flex-1 flex-col gap-2">
+                    <ConditionFields
+                      condition={step.condition}
+                      onChange={(condition) => onChangeChild(step.id, { condition })}
+                      timeLabel={step.kind === "recovery" ? "Отдых, сек" : undefined}
+                    />
+                    {step.kind === "interval" && (
+                      <PaceFields pace={step.pace} onChange={(pace) => onChangeChild(step.id, { pace })} />
                     )}
                   </div>
                   <Button
@@ -391,62 +387,99 @@ function blockTitle(kind: WorkoutBlock["kind"]): string {
   }
 }
 
-function DurationField({
-  label = "Длительность, сек",
-  value,
+/** Выбор условия окончания шага — время, дистанция или кнопка круга. */
+function ConditionFields({
+  condition,
   onChange,
+  timeLabel = "Длительность, сек",
+  distanceLabel = "Дистанция, м",
 }: {
-  label?: string;
-  value: number;
-  onChange: (value: number) => void;
+  condition: StepCondition;
+  onChange: (next: StepCondition) => void;
+  timeLabel?: string;
+  distanceLabel?: string;
 }) {
-  const id = useId();
+  const durationId = useId();
+  const distanceId = useId();
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id}>
-        {label} <span className="font-normal text-muted-foreground">≈ {formatDuration(value)}</span>
-      </Label>
-      <Input
-        id={id}
-        type="number"
-        min={0}
-        step={10}
-        className="w-32"
-        value={value}
-        onChange={(e) => onChange(Math.max(0, Math.round(Number(e.target.value) || 0)))}
-      />
+    <div className="flex flex-wrap items-end gap-3">
+      <ToggleGroup
+        variant="outline"
+        spacing={0}
+        value={[condition.type]}
+        onValueChange={(value) => {
+          const next = value[0] as StepCondition["type"] | undefined;
+          if (!next) return;
+          if (next === "time") {
+            onChange(timeCondition(condition.type === "time" ? condition.durationSec : 600));
+          } else if (next === "distance") {
+            onChange(distanceCondition(condition.type === "distance" ? condition.distanceM : 400));
+          } else {
+            onChange({ type: "lapButton" });
+          }
+        }}
+        aria-label="Условие окончания"
+      >
+        <ToggleGroupItem value="time">Время</ToggleGroupItem>
+        <ToggleGroupItem value="distance">Дистанция</ToggleGroupItem>
+        <ToggleGroupItem value="lapButton">Кнопка круга</ToggleGroupItem>
+      </ToggleGroup>
+
+      {condition.type === "time" && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={durationId}>
+            {timeLabel} <span className="font-normal text-muted-foreground">≈ {formatDuration(condition.durationSec)}</span>
+          </Label>
+          <Input
+            id={durationId}
+            type="number"
+            min={0}
+            step={10}
+            className="w-32"
+            value={condition.durationSec}
+            onChange={(e) =>
+              onChange(timeCondition(Math.max(0, Math.round(Number(e.target.value) || 0))))
+            }
+          />
+        </div>
+      )}
+
+      {condition.type === "distance" && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={distanceId}>{distanceLabel}</Label>
+          <Input
+            id={distanceId}
+            type="number"
+            min={1}
+            className="w-28"
+            value={condition.distanceM}
+            onChange={(e) =>
+              onChange(distanceCondition(Math.max(1, Math.round(Number(e.target.value) || 1))))
+            }
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function IntervalFields({
-  distanceM,
+function PaceFields({
   pace,
   onChange,
 }: {
-  distanceM: number;
   pace: PaceRange | null;
-  onChange: (next: { distanceM?: number; pace?: PaceRange | null }) => void;
+  onChange: (next: PaceRange | null) => void;
 }) {
   return (
     <div className="flex flex-wrap items-end gap-3">
-      <div className="flex flex-col gap-1.5">
-        <Label>Дистанция, м</Label>
-        <Input
-          type="number"
-          min={1}
-          className="w-28"
-          value={distanceM}
-          onChange={(e) => onChange({ distanceM: Math.max(1, Math.round(Number(e.target.value) || 1)) })}
-        />
-      </div>
       <div className="flex flex-col gap-1.5">
         <Label>Темп быстрее, /км</Label>
         <Input
           placeholder="4:20"
           className="w-24"
           value={pace?.fast ?? ""}
-          onChange={(e) => onChange({ pace: { fast: e.target.value, slow: pace?.slow ?? "" } })}
+          onChange={(e) => onChange({ fast: e.target.value, slow: pace?.slow ?? "" })}
         />
       </div>
       <div className="flex flex-col gap-1.5">
@@ -455,11 +488,11 @@ function IntervalFields({
           placeholder="4:40"
           className="w-24"
           value={pace?.slow ?? ""}
-          onChange={(e) => onChange({ pace: { fast: pace?.fast ?? "", slow: e.target.value } })}
+          onChange={(e) => onChange({ fast: pace?.fast ?? "", slow: e.target.value })}
         />
       </div>
       {pace && (pace.fast !== "" || pace.slow !== "") && (
-        <Button variant="ghost" size="xs" onClick={() => onChange({ pace: null })}>
+        <Button variant="ghost" size="xs" onClick={() => onChange(null)}>
           Убрать темп
         </Button>
       )}
