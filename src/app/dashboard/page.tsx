@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { requireUser } from "@/lib/auth/session";
 import { LogoutButton } from "@/components/logout-button";
 import { FitUpload } from "@/components/fit-files/fit-upload";
 import { FitFileList } from "@/components/fit-files/fit-file-list";
 import { GarminSyncOnOpen } from "@/components/garmin/garmin-sync-on-open";
 import { GarminStatusBanner } from "@/components/garmin/garmin-status-banner";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -39,6 +41,10 @@ export default async function DashboardPage() {
 
       <FitUpload />
       <FitFileList userId={user.id} />
+
+      <Button variant="outline" nativeButton={false} render={<Link href="/structured-workouts" />}>
+        Конструктор структурированных тренировок
+      </Button>
     </main>
   );
 }
