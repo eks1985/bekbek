@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { SessionUser } from "@/lib/auth/session";
-import { getFitFile, listFitFiles } from "@/lib/fit-files/queries";
+import { getFitFile, listAllFitFiles } from "@/lib/fit-files/queries";
 import { reparseFitFile } from "@/lib/fit-files/reparse";
 import { allowReparse } from "@/lib/rate-limit";
 import { reparseSchema } from "@/lib/validation";
@@ -104,7 +104,7 @@ export function createMcpServer(user: SessionUser): McpServer {
         "Все загруженные файлы, включая те, что не удалось разобрать (workout: null).",
       annotations: { readOnlyHint: true },
     },
-    async () => json(await listFitFiles(user.id)),
+    async () => json(await listAllFitFiles(user.id)),
   );
 
   server.registerTool(

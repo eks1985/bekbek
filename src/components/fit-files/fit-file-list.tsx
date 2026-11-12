@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CirclePlay } from "lucide-react";
+import { ChevronLeft, ChevronRight, CirclePlay } from "lucide-react";
 import { listFitFiles, type FitFileListItem } from "@/lib/fit-files/queries";
 import { Button } from "@/components/ui/button";
 import { GarminHistoryButton } from "@/components/garmin/garmin-history-button";
@@ -28,15 +28,15 @@ function formatDistance(meters: number | null): string {
   return meters === null ? "—" : `${(meters / 1000).toFixed(2)} км`;
 }
 
-/** Серверный компонент: список FIT-файлов пользователя из БД. */
-export async function FitFileList({ userId }: { userId: string }) {
-  const files = await listFitFiles(userId);
+/** Серверный компонент: список FIT-файлов пользователя из БД, по страницам. */
+export async function FitFileList({ userId, page = 1 }: { userId: string; page?: number }) {
+  const { files, total, page: currentPage, pageCount } = await listFitFiles(userId, page);
 
   return (
     <Card className="w-full">
       <CardHeader>
         <CardTitle>Загруженные файлы</CardTitle>
-        <CardDescription>Всего: {files.length}</CardDescription>
+        <CardDescription>Всего: {total}</CardDescription>
         <CardAction>
           <GarminHistoryButton />
         </CardAction>
@@ -52,7 +52,40 @@ export async function FitFileList({ userId }: { userId: string }) {
           </table>
         )}
       </CardContent>
+      {pageCount > 1 && <FitFilePagination page={currentPage} pageCount={pageCount} />}
     </Card>
+  );
+}
+
+function pageHref(page: number): string {
+  return page <= 1 ? "/dashboard" : `/dashboard?page=${page}`;
+}
+
+function FitFilePagination({ page, pageCount }: { page: number; pageCount: number }) {
+  return (
+    <div className="flex items-center justify-center gap-3 border-t pt-3">
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        disabled={page <= 1}
+        nativeButton={page <= 1}
+        render={page <= 1 ? undefined : <Link href={pageHref(page - 1)} aria-label="Предыдущая страница" />}
+      >
+        <ChevronLeft />
+      </Button>
+      <span className="text-sm text-muted-foreground tabular-nums">
+        Страница {page} из {pageCount}
+      </span>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        disabled={page >= pageCount}
+        nativeButton={page >= pageCount}
+        render={page >= pageCount ? undefined : <Link href={pageHref(page + 1)} aria-label="Следующая страница" />}
+      >
+        <ChevronRight />
+      </Button>
+    </div>
   );
 }
 

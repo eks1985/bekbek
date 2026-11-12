@@ -16,10 +16,12 @@ import {
 
 export const runtime = "nodejs";
 
-export default async function DashboardPage() {
+export default async function DashboardPage(props: PageProps<"/dashboard">) {
   // Настоящая проверка сессии (proxy лишь смотрит наличие cookie).
   // requireUser сам уведёт на /login, если не вошёл, и вернёт пользователя.
   const user = await requireUser();
+  const { page } = await props.searchParams;
+  const pageNum = Number(page) || 1;
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
@@ -40,7 +42,7 @@ export default async function DashboardPage() {
       </Card>
 
       <FitUpload />
-      <FitFileList userId={user.id} />
+      <FitFileList userId={user.id} page={pageNum} />
 
       <Button variant="outline" nativeButton={false} render={<Link href="/structured-workouts" />}>
         Конструктор структурированных тренировок

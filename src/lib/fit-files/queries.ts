@@ -12,7 +12,9 @@ import { db } from "@/lib/db";
  * только nullable-колонки), а список у одного пользователя небольшой —
  * личный лог тренировок, не тысячи строк.
  */
-export async function listFitFiles(userId: string) {
+export const FIT_FILES_PAGE_SIZE = 10;
+
+export async function listAllFitFiles(userId: string) {
   const files = await db.fitFile.findMany({
     where: { userId },
     select: {
@@ -40,7 +42,25 @@ export async function listFitFiles(userId: string) {
   });
 }
 
-export type FitFileListItem = Awaited<ReturnType<typeof listFitFiles>>[number];
+/**
+ * Страница списка (1-based). Листаем в JS, не в БД — та же причина, что и у
+ * сортировки выше: порядок зависит от `workout.startTime` через связь.
+ */
+export async function listFitFiles(userId: string, page = 1) {
+  const files = await listAllFitFiles(userId);
+  const pageCount = Math.max(1, Math.ceil(files.length / FIT_FILES_PAGE_SIZE));
+  const currentPage = Math.min(Math.max(1, page), pageCount);
+  const start = (currentPage - 1) * FIT_FILES_PAGE_SIZE;
+
+  return {
+    files: files.slice(start, start + FIT_FILES_PAGE_SIZE),
+    total: files.length,
+    page: currentPage,
+    pageCount,
+  };
+}
+
+export type FitFileListItem = Awaited<ReturnType<typeof listAllFitFiles>>[number];
 
 /**
  * Один файл с результатом разбора. userId в условии обязателен: иначе чужой
