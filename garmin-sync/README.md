@@ -130,13 +130,26 @@ bek-bek (обычно свой `userId` из БД); регистрировать
   (status=failed, attempts+1).
 - `app/main.py` — FastAPI: `GET /health` (живость процесса, без user_id);
   `GET /users/{id}/health`, `POST /users/{id}/sync`, `POST /users/{id}/sync/history?count=N`,
-  `GET /users/{id}/activities`, `GET /users/{id}/activities/{activity_id}/fit`,
-  `POST /users/{id}/workouts` (создать структурированную тренировку, см. ниже),
-  `GET /users/{id}/auth` (страница) + `POST /users/{id}/auth/start`/`finish`.
+  `POST /users/{id}/history/enable`/`disable`, `GET /users/{id}/history/status`
+  (фоновая подгрузка всей истории, см. ниже), `GET /users/{id}/activities`,
+  `GET /users/{id}/activities/{activity_id}/fit`, `POST /users/{id}/workouts`
+  (создать структурированную тренировку, см. ниже), `GET /users/{id}/auth`
+  (страница) + `POST /users/{id}/auth/start`/`finish`.
   Общий `GARMIN_SYNC_TOKEN` на все эндпоинты (доверие к bek-bek-серверу);
   `/auth/start`/`/auth/finish` вдобавок принимают короткоживущую подписанную
   ссылку с dashboard. Троттлинг и lock синка — per-user (словари по `user_id`);
   у `/sync/history` троттлинга по времени нет — явный клик, не автоматика.
+  Единственный автономный процесс сервиса — фоновый asyncio-цикл в `lifespan`
+  (`_history_loop`): когда у пользователя `history_sync_active=1` в `meta`,
+  тянет по одной активности через `sync.sync_history` не чаще, чем раз в
+  `HISTORY_TICK_INTERVAL_SEC` (`GARMIN_HISTORY_RATE_PER_HOUR`, по умолчанию
+  30/час) — **независимо на каждого пользователя** (per-user таймер в
+  `meta.history_last_pull_at`, не общий бюджет на всех — бан Garmin привязан
+  к конкретному аккаунту). Делит `_sync_locks`/`meta.history_offset` с ручным
+  «+10», ошибка одного пользователя (включая истёкший токен) не роняет цикл
+  и не блокирует остальных. Останавливается сам, когда `sync_history` вернёт
+  `has_more: false`. Рассчитан строго на одну реплику процесса (см. докстринг
+  вверху `main.py`) — при нескольких репликах темп на пользователя удвоится.
 - `app/workout_builder.py` — собирает и грузит в Garmin структурированную
   тренировку (только бег) из JSON-схемы конструктора bek-bek (та же модель,
   что в `src/lib/structured-workouts/model.ts`): каждый шаг заканчивается по

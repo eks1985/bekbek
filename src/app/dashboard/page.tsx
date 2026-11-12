@@ -45,6 +45,10 @@ export default async function DashboardPage() {
       <Button variant="outline" nativeButton={false} render={<Link href="/structured-workouts" />}>
         Конструктор структурированных тренировок
       </Button>
+
+      <Button variant="outline" nativeButton={false} render={<Link href="/settings" />}>
+        Настройки
+      </Button>
     </main>
   );
 }

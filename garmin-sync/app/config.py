@@ -31,3 +31,10 @@ IMPORT_FROM = os.getenv("GARMIN_IMPORT_FROM", "")
 # Куда редиректить со страницы /auth после успешного входа (обычно dashboard
 # bek-bek); пусто — страница просто показывает «Готово» без перехода.
 AUTH_RETURN_URL = os.getenv("AUTH_RETURN_URL", "")
+
+# Фоновая подгрузка всей истории (см. /users/{id}/history/enable): сколько
+# активностей в час тянуть НА КАЖДОГО пользователя независимо — чтобы не
+# словить бан Garmin за частые запросы к одному аккаунту. Бан привязан к
+# конкретному Garmin-аккаунту, поэтому бюджет на пользователя, не общий.
+HISTORY_RATE_PER_HOUR = int(os.getenv("GARMIN_HISTORY_RATE_PER_HOUR", "30"))
+HISTORY_TICK_INTERVAL_SEC = 3600.0 / HISTORY_RATE_PER_HOUR

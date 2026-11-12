@@ -8,6 +8,9 @@ userId из своей БД); данные на диске и в SQLite разд
     GET  /users/{user_id}/activities?since=ISO
     GET  /users/{user_id}/activities/{id}/fit
     POST /users/{user_id}/workouts            создать структурированную тренировку в Garmin Connect
+    POST /users/{user_id}/history/enable      включить фоновую подгрузку всей истории (см. ниже)
+    POST /users/{user_id}/history/disable     выключить вручную
+    GET  /users/{user_id}/history/status      {active, offset, rate_per_hour}
     GET  /users/{user_id}/auth                страница обновления токена (без авторизации)
     POST /users/{user_id}/auth/start          шаг 1 входа: email+пароль
     POST /users/{user_id}/auth/finish         шаг 2: код MFA, если понадобился
@@ -24,9 +27,21 @@ HMAC-подписанную ссылку с dashboard bek-bek (?link=<exp>.<sig>
 для входа в чужой user_id, см. require_token_or_link). Синхронный
 garminconnect уходит в threadpool — FastAPI сам запускает обычные
 def-хендлеры там, поэтому /auth/* — не async.
+
+Фоновая подгрузка истории (history/enable) — единственный автономный процесс
+в сервисе: асинхронный цикл, запущенный в lifespan, тикает раз в несколько
+секунд и для каждого пользователя с history_sync_active=1 в meta тянет по
+одной активности через sync.sync_history, если с прошлого раза для ЭТОГО
+пользователя прошло достаточно времени (HISTORY_TICK_INTERVAL_SEC,
+app/config.py) — так у каждого свой независимый бюджет в час, не общий на
+всех. Рассчитано строго на одну реплику процесса: при нескольких репликах
+каждая гоняла бы свой цикл и общий темп на пользователя удвоился бы без
+видимой ошибки — если когда-нибудь поднимут больше одной реплики, это нужно
+будет пересмотреть.
 """
 
 import asyncio
+import contextlib
 import hmac
 import json
 import secrets
@@ -45,7 +60,15 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app import garmin_client, store, sync, workout_builder
-from app.config import AUTH_RETURN_URL, SYNC_MIN_INTERVAL_SEC, SYNC_TOKEN, token_dir_for
+from app.config import (
+    AUTH_RETURN_URL,
+    HISTORY_RATE_PER_HOUR,
+    HISTORY_TICK_INTERVAL_SEC,
+    LIST_LIMIT,
+    SYNC_MIN_INTERVAL_SEC,
+    SYNC_TOKEN,
+    token_dir_for,
+)
 
 _sync_locks: dict[str, asyncio.Lock] = {}
 
@@ -70,10 +93,63 @@ def _cleanup_pending_logins() -> None:
         _PENDING_LOGINS.pop(k, None)
 
 
+# Гранулярность проверки «пора ли этому пользователю» — не сам темп скачивания
+# (тот задаётся HISTORY_TICK_INTERVAL_SEC per-user, см. app/config.py).
+_HISTORY_POLL_INTERVAL_SEC = 10
+_history_task: "asyncio.Task | None" = None
+
+
+async def _history_tick_one(user_id: str) -> None:
+    """Продвигает ОДНОГО пользователя на одну активность истории, если для
+    него пришло время (независимый таймер per-user — см. докстринг модуля).
+    Ошибка (включая NotLoggedInError) не поднимается выше — логируется и
+    пропускается, чтобы не ронять цикл и не мешать другим пользователям."""
+    last = store.get_meta(user_id, "history_last_pull_at")
+    if last and _seconds_since(last) < HISTORY_TICK_INTERVAL_SEC:
+        return
+    lock = _lock_for(user_id)
+    if lock.locked():  # пользователь сам сейчас кликнул «+10» или открыл dashboard — не мешаем
+        return
+    result: dict | None = None
+    async with lock:
+        try:
+            result = await run_in_threadpool(sync.sync_history, user_id, 1)
+        except garmin_client.NotLoggedInError as e:
+            print(f"[history] {user_id}: не залогинен, пропускаю тик ({e})")
+        except Exception as e:  # ошибка конкретного пользователя не должна ронять цикл
+            print(f"[history] {user_id}: ошибка тика: {e}")
+        finally:
+            # Отметить попытку в любом случае — иначе при постоянной ошибке
+            # цикл долбил бы Garmin каждые _HISTORY_POLL_INTERVAL_SEC вместо
+            # раза в HISTORY_TICK_INTERVAL_SEC.
+            store.set_meta(user_id, "history_last_pull_at", datetime.now(timezone.utc).isoformat())
+    if result is not None and not result.get("has_more", True):
+        store.set_meta(user_id, "history_sync_active", "0")  # история кончилась
+
+
+async def _history_loop() -> None:
+    """Единственный автономный процесс в сервисе — см. докстринг модуля вверху
+    файла. Рассчитан строго на одну реплику (как сейчас в Dokploy/Swarm)."""
+    while True:
+        try:
+            await asyncio.sleep(_HISTORY_POLL_INTERVAL_SEC)
+            for user_id in store.list_users_with_meta("history_sync_active", "1"):
+                await _history_tick_one(user_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[history_loop] unexpected error: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     store.init()
+    global _history_task
+    _history_task = asyncio.create_task(_history_loop())
     yield
+    _history_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await _history_task
 
 
 app = FastAPI(title="garmin-sync", lifespan=lifespan)
@@ -166,6 +242,35 @@ async def do_sync_history(user_id: str, count: int = 10, _: None = Depends(requi
         except garmin_client.NotLoggedInError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
     return {**result, "busy": False}
+
+
+def _history_status(user_id: str) -> dict:
+    offset_str = store.get_meta(user_id, "history_offset")
+    return {
+        "active": store.get_meta(user_id, "history_sync_active") == "1",
+        "offset": int(offset_str) if offset_str else LIST_LIMIT,
+        "rate_per_hour": HISTORY_RATE_PER_HOUR,
+    }
+
+
+@app.post("/users/{user_id}/history/enable")
+def enable_history_sync(user_id: str, _: None = Depends(require_token)) -> dict:
+    """Включает фоновую подгрузку всей истории — следующий тик фонового
+    цикла её подхватит сам (цикл перечитывает активных пользователей из meta
+    на каждой итерации, см. _history_loop)."""
+    store.set_meta(user_id, "history_sync_active", "1")
+    return _history_status(user_id)
+
+
+@app.post("/users/{user_id}/history/disable")
+def disable_history_sync(user_id: str, _: None = Depends(require_token)) -> dict:
+    store.set_meta(user_id, "history_sync_active", "0")
+    return _history_status(user_id)
+
+
+@app.get("/users/{user_id}/history/status")
+def history_status(user_id: str, _: None = Depends(require_token)) -> dict:
+    return _history_status(user_id)
 
 
 @app.get("/users/{user_id}/activities")

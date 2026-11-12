@@ -147,6 +147,41 @@ export async function createGarminWorkout(
   return res.json();
 }
 
+export type GarminHistoryStatus = {
+  active: boolean;
+  offset: number;
+  rate_per_hour: number;
+};
+
+/**
+ * Фоновая подгрузка всей истории — garmin-sync сам тянет по одной активности
+ * в ~rate_per_hour час, пока не кончится история (см. app/main.py,
+ * _history_loop). Это чтения/записи meta, не поход в Garmin — обычный таймаут.
+ */
+export async function enableGarminHistorySync(userId: string): Promise<GarminHistoryStatus> {
+  const res = await garminFetch(`/users/${userId}/history/enable`, { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`garmin-sync /history/enable ответил ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function disableGarminHistorySync(userId: string): Promise<GarminHistoryStatus> {
+  const res = await garminFetch(`/users/${userId}/history/disable`, { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`garmin-sync /history/disable ответил ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getGarminHistoryStatus(userId: string): Promise<GarminHistoryStatus> {
+  const res = await garminFetch(`/users/${userId}/history/status`);
+  if (!res.ok) {
+    throw new Error(`garmin-sync /history/status ответил ${res.status}`);
+  }
+  return res.json();
+}
+
 /**
  * Ссылка на /auth сервиса с короткоживущей (10 мин) HMAC-подписью вместо
  * ручного ввода GARMIN_SYNC_TOKEN — тот же секрет, что и для серверных

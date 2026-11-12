@@ -155,3 +155,13 @@ def set_meta(user_id: str, key: str, value: str) -> None:
             "ON CONFLICT(user_id, key) DO UPDATE SET value=excluded.value",
             (user_id, key, value),
         )
+
+
+def list_users_with_meta(key: str, value: str) -> list[str]:
+    """user_id всех, у кого meta[key] == value — например, кто сейчас включил
+    фоновую подгрузку истории (key="history_sync_active")."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT user_id FROM meta WHERE key = ? AND value = ?", (key, value)
+        ).fetchall()
+    return [r["user_id"] for r in rows]
