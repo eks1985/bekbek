@@ -7,7 +7,7 @@ export const emailSchema = z
   .email()
   .max(254);
 
-// Код — ровно 6 цифр.
+// Код из письма — ровно 6 цифр.
 export const codeSchema = z
   .string()
   .trim()
@@ -17,9 +17,11 @@ export const requestCodeSchema = z.object({
   email: emailSchema,
 });
 
+// Код входа: 6 цифр из письма либо секретный код (ADMIN_CODE). Формат
+// секретного кода не проверяем — иначе ошибка валидации выдаст его длину.
 export const verifySchema = z.object({
   email: emailSchema,
-  code: codeSchema,
+  code: z.string().trim().min(1).max(128),
 });
 
 // Повторный разбор: своя схема либо параметры режима auto.
